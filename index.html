@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Debug DeviceOrientation / DeviceMotion</title>
+  <title>Шарик наклоном</title>
   <style>
     :root {
       color-scheme: dark;
@@ -75,40 +75,9 @@
       font-size: 0.95rem;
     }
 
-    .last-action {
-      min-height: 52px;
-      display: grid;
-      place-items: center;
-      padding: 10px 14px;
-      border: 1px solid #334155;
-      border-radius: 16px;
-      background: #0f172a;
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: 0.03em;
-      text-align: center;
-    }
-
-    .last-action.flash {
-      animation: actionFlash 0.6s ease-out;
-    }
-
-    @keyframes actionFlash {
-      0% {
-        background: rgba(34, 197, 94, 0.28);
-        border-color: rgba(34, 197, 94, 0.9);
-        transform: scale(1.01);
-      }
-      100% {
-        background: #0f172a;
-        border-color: #334155;
-        transform: scale(1);
-      }
-    }
-
     .canvas-wrap {
       width: 100%;
-      height: min(55vh, 480px);
+      height: min(62vh, 560px);
       border: 1px solid #334155;
       border-radius: 20px;
       overflow: hidden;
@@ -123,6 +92,7 @@
       height: 100%;
       display: block;
       touch-action: none;
+      cursor: crosshair;
     }
 
     .values {
@@ -199,16 +169,6 @@
       accent-color: #3b82f6;
     }
 
-    select {
-      width: 100%;
-      border: 1px solid #334155;
-      background: #0f172a;
-      color: #e2e8f0;
-      border-radius: 10px;
-      padding: 9px 10px;
-      font-size: 0.95rem;
-    }
-
     .checkbox-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -233,41 +193,6 @@
       accent-color: #3b82f6;
     }
 
-    .log {
-      height: 220px;
-      overflow: auto;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      background: #020617;
-      padding: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.86rem;
-      line-height: 1.45;
-    }
-
-    .log-line {
-      padding: 2px 0;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.08);
-      word-break: break-word;
-    }
-
-    .log-line.info {
-      color: #cbd5e1;
-    }
-
-    .log-line.action {
-      color: #4ade80;
-      font-weight: 700;
-    }
-
-    .log-line.warn {
-      color: #facc15;
-    }
-
-    .log-line.error {
-      color: #f87171;
-    }
-
     .footer-note {
       color: #64748b;
       font-size: 0.86rem;
@@ -277,232 +202,110 @@
 </head>
 <body>
   <main>
-    <h1>Debug DeviceOrientation / DeviceMotion</h1>
+    <h1>Шарик наклоном</h1>
     <p class="subtitle">
-      Возле вертикали `alpha` и `gamma` могут сходить с ума из-за сингулярности Euler-углов.
-      В этой версии 3D и наклон по умолчанию используют акселерометр, чтобы не зависеть от `alpha`/`gamma`.
+      Положи телефон на стол и нажми «Центр». После этого в горизонтальном положении шарик должен стоять.
+      Наклон телефона катит шарик. Скорость зависит от угла наклона.
     </p>
 
     <div class="toolbar">
       <button id="enableBtn" type="button">Включить сенсоры</button>
-      <button id="calibrateBtn" type="button" disabled>Центр</button>
-      <button id="testTiltBtn" type="button">Тест наклона</button>
-      <button id="testShakeBtn" type="button">Тест встряхивания</button>
-      <button id="clearLogBtn" type="button">Очистить лог</button>
+      <button id="centerBtn" type="button">Центр</button>
+      <button id="resetBtn" type="button">Сброс шарика</button>
     </div>
 
-    <div id="status">Сенсоры выключены.</div>
-    <div id="lastAction" class="last-action">Ожидание действий...</div>
+    <div id="status">
+      Сенсоры выключены. На телефоне нажми «Включить сенсоры». На компьютере можно тянуть мышью или пальцем по полю.
+    </div>
 
     <div class="canvas-wrap">
       <canvas id="canvas"></canvas>
     </div>
 
     <div class="values">
-      <div class="value"><span>alpha raw</span><b id="valAlpha">0.0°</b></div>
-      <div class="value"><span>beta raw</span><b id="valBeta">0.0°</b></div>
-      <div class="value"><span>gamma raw</span><b id="valGamma">0.0°</b></div>
-      <div class="value"><span>tilt</span><b id="valTilt">0.0°</b></div>
-      <div class="value"><span>accel / deviation</span><b id="valAcc">0.00</b></div>
-      <div class="value"><span>active axis</span><b id="valAxis">gamma</b></div>
-      <div class="value"><span>tilt source</span><b id="valSource">-</b></div>
-      <div class="value"><span>tilt armed</span><b id="valArmed">armed</b></div>
+      <div class="value"><span>tilt X</span><b id="valTiltX">0.00</b></div>
+      <div class="value"><span>tilt Y</span><b id="valTiltY">0.00</b></div>
+      <div class="value"><span>speed</span><b id="valSpeed">0 px/s</b></div>
+      <div class="value"><span>source</span><b id="valSource">none</b></div>
     </div>
 
     <section class="panel">
-      <h2>Настройки</h2>
+      <h2>Настройки физики</h2>
 
       <div class="settings">
         <div class="setting">
-          <label for="tiltThreshold">
-            Порог наклона для действия
-            <output id="tiltThresholdValue">25°</output>
+          <label for="sensitivity">
+            Чувствительность
+            <output id="sensitivityValue">220</output>
           </label>
-          <input id="tiltThreshold" type="range" min="5" max="90" step="1" value="25" />
+          <input id="sensitivity" type="range" min="10" max="800" step="5" value="220" />
         </div>
 
         <div class="setting">
-          <label for="tiltResetThreshold">
-            Порог возврата в центр после наклона
-            <output id="tiltResetThresholdValue">10°</output>
+          <label for="friction">
+            Трение
+            <output id="frictionValue">2.2</output>
           </label>
-          <input id="tiltResetThreshold" type="range" min="2" max="45" step="1" value="10" />
+          <input id="friction" type="range" min="0" max="10" step="0.1" value="2.2" />
         </div>
 
         <div class="setting">
-          <label for="tiltCooldownMs">
-            Cooldown наклона
-            <output id="tiltCooldownMsValue">700 ms</output>
+          <label for="restitution">
+            Отскок от стен
+            <output id="restitutionValue">0.45</output>
           </label>
-          <input id="tiltCooldownMs" type="range" min="0" max="3000" step="50" value="700" />
+          <input id="restitution" type="range" min="0" max="0.95" step="0.05" value="0.45" />
         </div>
 
         <div class="setting">
-          <label for="tiltDebounceMs">
-            Подтверждение наклона, debounce
-            <output id="tiltDebounceMsValue">180 ms</output>
+          <label for="deadZone">
+            Мёртвая зона, м/с²
+            <output id="deadZoneValue">0.20</output>
           </label>
-          <input id="tiltDebounceMs" type="range" min="0" max="1000" step="10" value="180" />
+          <input id="deadZone" type="range" min="0" max="2" step="0.05" value="0.2" />
         </div>
 
         <div class="setting">
-          <label for="actionFilter">
-            Фильтр наклона, сильнее = стабильнее
-            <output id="actionFilterValue">0.55</output>
+          <label for="sensorFilter">
+            Фильтр датчика, сильнее = стабильнее
+            <output id="sensorFilterValue">0.85</output>
           </label>
-          <input id="actionFilter" type="range" min="0" max="0.95" step="0.01" value="0.55" />
+          <input id="sensorFilter" type="range" min="0" max="0.98" step="0.01" value="0.85" />
         </div>
 
         <div class="setting">
-          <label for="shakeAccelThreshold">
-            Порог встряхивания для acceleration
-            <output id="shakeAccelThresholdValue">11.0</output>
+          <label for="radius">
+            Радиус шарика
+            <output id="radiusValue">18 px</output>
           </label>
-          <input id="shakeAccelThreshold" type="range" min="1" max="30" step="0.5" value="11" />
+          <input id="radius" type="range" min="8" max="50" step="1" value="18" />
         </div>
 
         <div class="setting">
-          <label for="shakeGravityDeviationThreshold">
-            Порог встряхивания для gravity deviation
-            <output id="shakeGravityDeviationThresholdValue">8.0</output>
+          <label for="maxSpeed">
+            Максимальная скорость
+            <output id="maxSpeedValue">1600 px/s</output>
           </label>
-          <input id="shakeGravityDeviationThreshold" type="range" min="1" max="20" step="0.5" value="8" />
-        </div>
-
-        <div class="setting">
-          <label for="shakeCooldownMs">
-            Cooldown встряхивания
-            <output id="shakeCooldownMsValue">900 ms</output>
-          </label>
-          <input id="shakeCooldownMs" type="range" min="0" max="3000" step="50" value="900" />
-        </div>
-
-        <div class="setting">
-          <label for="smoothing">
-            Сглаживание 3D-вида
-            <output id="smoothingValue">0.65</output>
-          </label>
-          <input id="smoothing" type="range" min="0" max="0.95" step="0.01" value="0.65" />
-        </div>
-
-        <div class="setting">
-          <label for="visualScale">
-            Масштаб сцены
-            <output id="visualScaleValue">1.00</output>
-          </label>
-          <input id="visualScale" type="range" min="0.4" max="2.5" step="0.05" value="1" />
-        </div>
-
-        <div class="setting">
-          <label for="viewYaw">
-            Поворот камеры вокруг Y
-            <output id="viewYawValue">-25°</output>
-          </label>
-          <input id="viewYaw" type="range" min="-180" max="180" step="1" value="-25" />
-        </div>
-
-        <div class="setting">
-          <label for="viewPitch">
-            Наклон камеры вокруг X
-            <output id="viewPitchValue">-25°</output>
-          </label>
-          <input id="viewPitch" type="range" min="-90" max="90" step="1" value="-25" />
-        </div>
-
-        <div class="setting">
-          <label for="tiltAxis">Ось для определения наклона</label>
-          <select id="tiltAxis">
-            <option value="auto">auto</option>
-            <option value="gamma">gamma</option>
-            <option value="beta">beta</option>
-          </select>
-        </div>
-
-        <div class="setting">
-          <label for="tiltSource">Источник наклона</label>
-          <select id="tiltSource">
-            <option value="accelerometer">accelerometer</option>
-            <option value="auto">auto</option>
-            <option value="orientation">orientation</option>
-          </select>
-        </div>
-
-        <div class="setting">
-          <label for="orientationSource">Событие ориентации</label>
-          <select id="orientationSource">
-            <option value="auto">auto</option>
-            <option value="deviceorientation">deviceorientation</option>
-            <option value="deviceorientationabsolute">deviceorientationabsolute</option>
-          </select>
+          <input id="maxSpeed" type="range" min="200" max="4000" step="50" value="1600" />
         </div>
 
         <div class="checkbox-grid">
           <label class="checkbox">
-            <input type="checkbox" id="accelVisual" checked />
-            Использовать акселерометр для 3D
+            <input type="checkbox" id="invertX" />
+            Инверсия оси X
           </label>
 
           <label class="checkbox">
-            <input type="checkbox" id="relativeVisual" checked />
-            Относительный 3D-режим от кнопки «Центр»
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="invertTiltAction" />
-            Инвертировать направление наклона
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="accelInvertX" />
-            Инверсия акселерометра X
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="accelInvertY" />
-            Инверсия акселерометра Y
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="accelInvertZ" />
-            Инверсия акселерометра Z
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="ignoreAlpha" checked />
-            Игнорировать alpha в старом 3D-режиме
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="stabilizeVertical" checked />
-            Стабилизировать старый 3D-режим возле вертикали
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="invertAlpha" />
-            Инверсия alpha для старого 3D
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="invertBeta" />
-            Инверсия beta для старого 3D
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="invertGamma" />
-            Инверсия gamma для старого 3D
+            <input type="checkbox" id="invertY" />
+            Инверсия оси Y
           </label>
         </div>
       </div>
     </section>
 
-    <section class="panel">
-      <h2>Лог</h2>
-      <div id="log" class="log"></div>
-    </section>
-
     <p class="footer-note">
-      Сырые `alpha` и `gamma` могут продолжать прыгать в верхних значениях — это свойство
-      `deviceorientation` около `beta = 90°`. Для действий и 3D лучше использовать акселерометр.
+      Если шарик катится не в ту сторону, включи инверсию оси.
+      Если на ровном столе шарик медленно уезжает, нажми «Центр» или увеличи мёртвую зону / фильтр датчика.
     </p>
   </main>
 
@@ -515,80 +318,20 @@
     const ctx = canvas.getContext("2d");
 
     const settings = {
-      tiltThreshold: 25,
-      tiltResetThreshold: 10,
-      tiltCooldownMs: 700,
-      tiltDebounceMs: 180,
-      actionFilter: 0.55,
-
-      shakeAccelThreshold: 11,
-      shakeGravityDeviationThreshold: 8,
-      shakeCooldownMs: 900,
-
-      smoothing: 0.65,
-      visualScale: 1,
-      viewYaw: -25,
-      viewPitch: -25,
-
-      tiltAxis: "auto",
-      tiltSource: "accelerometer",
-      orientationSource: "auto",
-
-      accelVisual: true,
-      accelInvertX: false,
-      accelInvertY: false,
-      accelInvertZ: false,
-
-      invertTiltAction: false,
-      relativeVisual: true,
-      ignoreAlpha: true,
-      stabilizeVertical: true,
-      invertAlpha: false,
-      invertBeta: false,
-      invertGamma: false
+      sensitivity: 220,
+      friction: 2.2,
+      restitution: 0.45,
+      deadZone: 0.2,
+      sensorFilter: 0.85,
+      radius: 18,
+      maxSpeed: 1600,
+      invertX: false,
+      invertY: false
     };
 
     const state = {
       sensorsEnabled: false,
-      gotOrientation: false,
       gotMotion: false,
-
-      raw: {
-        alpha: 0,
-        beta: 0,
-        gamma: 0
-      },
-
-      display: {
-        alpha: 0,
-        beta: 0,
-        gamma: 0,
-        accMag: 0
-      },
-
-      base: {
-        alpha: 0,
-        beta: 0,
-        gamma: 0,
-        set: false
-      },
-
-      orientationEventName: null,
-
-      activeAxis: "gamma",
-      currentTilt: 0,
-      lastTiltSource: "-",
-      lastTiltSourceKey: "",
-      filteredTilt: 0,
-
-      pendingTiltDirection: null,
-      pendingTiltSince: 0,
-
-      tiltArmed: true,
-      lastTiltAt: 0,
-      lastShakeAt: 0,
-
-      accTarget: 0,
 
       accel: {
         x: 0,
@@ -597,59 +340,49 @@
         has: false
       },
 
-      accelAxis: null,
-      accelAngle: 0,
-      accelBase: 0,
-      accelBaseSet: false,
-      accelTiltRaw: 0,
-      orientationTiltRaw: 0,
+      base: {
+        x: 0,
+        y: 0,
+        set: false
+      },
 
-      baseAccelMatrix: null
+      currentAccel: {
+        x: 0,
+        y: 0
+      },
+
+      source: "none",
+
+      pointer: {
+        active: false,
+        x: 0,
+        y: 0
+      }
     };
+
+    const ball = {
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      texX: 0,
+      texY: 0
+    };
+
+    let cssW = 0;
+    let cssH = 0;
+    let initialized = false;
 
     function setStatus(text) {
       $("status").textContent = text;
     }
 
-    function log(message, type = "info") {
-      const logEl = $("log");
-      const line = document.createElement("div");
-      const time = new Date().toLocaleTimeString("ru-RU");
-
-      line.className = `log-line ${type}`;
-      line.textContent = `[${time}] ${message}`;
-      logEl.prepend(line);
-
-      while (logEl.children.length > 250) {
-        logEl.removeChild(logEl.lastChild);
-      }
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
     }
 
-    function flashAction(text) {
-      const el = $("lastAction");
-      el.textContent = text;
-      el.classList.remove("flash");
-      void el.offsetWidth;
-      el.classList.add("flash");
-    }
-
-    function deg2rad(value) {
-      return value * Math.PI / 180;
-    }
-
-    function normalizeAngle(value) {
-      if (!Number.isFinite(value)) return 0;
-
-      let a = value % 360;
-      if (a <= -180) a += 360;
-      if (a > 180) a -= 360;
-
-      return a;
-    }
-
-    function smoothAngle(current, target, factor) {
-      const delta = normalizeAngle(target - current);
-      return normalizeAngle(current + delta * factor);
+    function mod(value, modulo) {
+      return ((value % modulo) + modulo) % modulo;
     }
 
     function validXYZ(obj) {
@@ -659,172 +392,102 @@
         Number.isFinite(obj.z);
     }
 
-    function clamp(value, min, max) {
-      return Math.max(min, Math.min(max, value));
-    }
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
 
-    function getScreenAngle() {
-      let angle = 0;
+      cssW = rect.width;
+      cssH = rect.height;
 
-      if (screen.orientation && typeof screen.orientation.angle === "number") {
-        angle = screen.orientation.angle;
-      } else if (typeof window.orientation === "number") {
-        angle = window.orientation;
-      }
+      canvas.width = Math.max(1, Math.floor(cssW * dpr));
+      canvas.height = Math.max(1, Math.floor(cssH * dpr));
 
-      return ((angle % 360) + 360) % 360;
-    }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    function getActiveAxis() {
-      if (settings.tiltAxis !== "auto") return settings.tiltAxis;
-      const screenAngle = getScreenAngle();
-      return screenAngle % 180 === 0 ? "gamma" : "beta";
-    }
-
-    function shouldUseAccelerometer() {
-      if (settings.tiltSource === "accelerometer") return true;
-      if (settings.tiltSource === "orientation") return false;
-
-      if (!state.accel.has) return false;
-
-      const betaAbs = Math.abs(normalizeAngle(state.raw.beta));
-      return betaAbs > 55 && betaAbs < 125;
-    }
-
-    function doTilt(direction, value, source = "sensor") {
-      let dir = direction;
-
-      if (settings.invertTiltAction && (dir === "RIGHT" || dir === "LEFT")) {
-        dir = dir === "RIGHT" ? "LEFT" : "RIGHT";
-      }
-
-      const message =
-        `TILT_${dir} source=${source} axis=${state.activeAxis} ` +
-        `value=${Number(value).toFixed(1)}° threshold=${settings.tiltThreshold.toFixed(0)}°`;
-
-      log(message, "action");
-      flashAction(`TILT_${dir}`);
-    }
-
-    function doShake(value, source, threshold) {
-      const message =
-        `SHAKE source=${source} value=${Number(value).toFixed(2)} ` +
-        `threshold=${Number(threshold || 0).toFixed(2)}`;
-
-      log(message, "action");
-      flashAction("SHAKE");
-    }
-
-    function resetTiltState() {
-      state.lastTiltSourceKey = "";
-      state.filteredTilt = 0;
-      state.pendingTiltDirection = null;
-      state.pendingTiltSince = Date.now();
-      state.tiltArmed = true;
-      state.currentTilt = 0;
-    }
-
-    function processTilt(rawTilt, source) {
-      const axis = state.activeAxis;
-      const key = `${source}:${axis}`;
-
-      if (state.lastTiltSourceKey !== key) {
-        state.lastTiltSourceKey = key;
-        state.filteredTilt = rawTilt;
-        state.pendingTiltDirection = null;
-        state.pendingTiltSince = Date.now();
-      }
-
-      const factor = Math.max(0.0001, 1 - settings.actionFilter);
-      state.filteredTilt = smoothAngle(state.filteredTilt, rawTilt, factor);
-
-      const tilt = state.filteredTilt;
-      state.currentTilt = tilt;
-      state.lastTiltSource = source;
-
-      const now = Date.now();
-
-      let direction = null;
-
-      if (tilt > settings.tiltThreshold) {
-        direction = "RIGHT";
-      } else if (tilt < -settings.tiltThreshold) {
-        direction = "LEFT";
-      }
-
-      if (direction) {
-        if (state.pendingTiltDirection === direction) {
-          const stableFor = now - state.pendingTiltSince;
-          const canFire =
-            stableFor >= settings.tiltDebounceMs &&
-            state.tiltArmed &&
-            now - state.lastTiltAt > settings.tiltCooldownMs;
-
-          if (canFire) {
-            doTilt(direction, tilt, source);
-            state.tiltArmed = false;
-            state.lastTiltAt = now;
-            state.pendingTiltDirection = null;
-          }
-        } else {
-          state.pendingTiltDirection = direction;
-          state.pendingTiltSince = now;
-        }
+      if (!initialized) {
+        resetBall();
+        initialized = true;
       } else {
-        state.pendingTiltDirection = null;
-        state.pendingTiltSince = now;
-      }
-
-      if (Math.abs(tilt) < settings.tiltResetThreshold) {
-        state.tiltArmed = true;
+        clampBall();
       }
     }
 
-    function onOrientation(event) {
-      if (!state.sensorsEnabled) return;
+    function resetBall() {
+      ball.x = cssW / 2;
+      ball.y = cssH / 2;
+      ball.vx = 0;
+      ball.vy = 0;
+      ball.texX = 0;
+      ball.texY = 0;
+    }
 
-      state.gotOrientation = true;
+    function clampBall() {
+      const r = settings.radius;
 
-      const alpha = Number.isFinite(event.alpha) ? event.alpha : 0;
-      const beta = Number.isFinite(event.beta) ? event.beta : 0;
-      const gamma = Number.isFinite(event.gamma) ? event.gamma : 0;
-
-      state.raw.alpha = alpha;
-      state.raw.beta = beta;
-      state.raw.gamma = gamma;
-
-      if (!state.base.set) {
-        state.base.alpha = alpha;
-        state.base.beta = beta;
-        state.base.gamma = gamma;
-        state.base.set = true;
-        log("Автокалибровка базового положения. Нажми «Центр», если нужно переопределить.", "info");
+      if (cssW > r * 2) {
+        ball.x = clamp(ball.x, r, cssW - r);
+      } else {
+        ball.x = cssW / 2;
       }
 
-      state.activeAxis = getActiveAxis();
-
-      const current = state.activeAxis === "beta" ? beta : gamma;
-      const base = state.activeAxis === "beta" ? state.base.beta : state.base.gamma;
-      const orientationTilt = normalizeAngle(current - base);
-
-      state.orientationTiltRaw = orientationTilt;
-
-      const useAccelerometer = shouldUseAccelerometer();
-
-      const allowOrientation =
-        settings.tiltSource === "orientation" ||
-        (settings.tiltSource === "auto" && (!useAccelerometer || !state.accel.has));
-
-      if (allowOrientation) {
-        processTilt(orientationTilt, "orientation");
+      if (cssH > r * 2) {
+        ball.y = clamp(ball.y, r, cssH - r);
+      } else {
+        ball.y = cssH / 2;
       }
     }
 
-    function getAccelVector() {
+    function applyDeadZone(x, y) {
+      const magnitude = Math.hypot(x, y);
+
+      if (magnitude < settings.deadZone) {
+        return { x: 0, y: 0 };
+      }
+
+      const scale = (magnitude - settings.deadZone) / magnitude;
+
       return {
-        x: state.accel.x * (settings.accelInvertX ? -1 : 1),
-        y: state.accel.y * (settings.accelInvertY ? -1 : 1),
-        z: state.accel.z * (settings.accelInvertZ ? -1 : 1)
+        x: x * scale,
+        y: y * scale
+      };
+    }
+
+    function getTilt() {
+      if (state.sensorsEnabled && state.accel.has && state.base.set) {
+        const gx = state.accel.x - state.base.x;
+        const gy = state.accel.y - state.base.y;
+
+        // Подбор знаков: обычно правый наклон и верх/низ зависят от конкретной реализации.
+        // Если направление неверное, используются галочки инверсии.
+        let ax = -gx;
+        let ay = gy;
+
+        if (settings.invertX) ax = -ax;
+        if (settings.invertY) ay = -ay;
+
+        const deadZoned = applyDeadZone(ax, ay);
+
+        return {
+          x: deadZoned.x,
+          y: deadZoned.y,
+          source: "sensor"
+        };
+      }
+
+      if (state.pointer.active) {
+        const deadZoned = applyDeadZone(state.pointer.x, state.pointer.y);
+
+        return {
+          x: deadZoned.x,
+          y: deadZoned.y,
+          source: "pointer"
+        };
+      }
+
+      return {
+        x: 0,
+        y: 0,
+        source: "none"
       };
     }
 
@@ -833,827 +496,317 @@
 
       state.gotMotion = true;
 
-      const now = Date.now();
-      let usedAccelerationForShake = false;
-
-      if (validXYZ(event.acceleration)) {
-        const x = event.acceleration.x;
-        const y = event.acceleration.y;
-        const z = event.acceleration.z;
-
-        const magnitude = Math.hypot(x, y, z);
-        state.accTarget = magnitude;
-        usedAccelerationForShake = true;
-
-        if (
-          now - state.lastShakeAt > settings.shakeCooldownMs &&
-          magnitude > settings.shakeAccelThreshold
-        ) {
-          state.lastShakeAt = now;
-          doShake(magnitude, "acceleration", settings.shakeAccelThreshold);
-        }
+      if (!validXYZ(event.accelerationIncludingGravity)) {
+        return;
       }
 
-      if (validXYZ(event.accelerationIncludingGravity)) {
-        const g = event.accelerationIncludingGravity;
+      const g = event.accelerationIncludingGravity;
+      const factor = Math.max(0.0001, 1 - settings.sensorFilter);
 
-        const factor = Math.max(0.0001, 1 - settings.actionFilter);
-
-        if (!state.accel.has) {
-          state.accel.x = g.x;
-          state.accel.y = g.y;
-          state.accel.z = g.z;
-          state.accel.has = true;
-        } else {
-          state.accel.x += (g.x - state.accel.x) * factor;
-          state.accel.y += (g.y - state.accel.y) * factor;
-          state.accel.z += (g.z - state.accel.z) * factor;
-        }
-
-        state.activeAxis = getActiveAxis();
-
-        if (state.accelAxis !== state.activeAxis) {
-          state.accelAxis = state.activeAxis;
-          state.accelBaseSet = false;
-        }
-
-        const vec = getAccelVector();
-
-        let accelAngle;
-
-        if (state.activeAxis === "beta") {
-          accelAngle = Math.atan2(vec.y, Math.hypot(vec.x, vec.z)) * 180 / Math.PI;
-        } else {
-          accelAngle = Math.atan2(vec.x, Math.hypot(vec.y, vec.z)) * 180 / Math.PI;
-        }
-
-        state.accelAngle = accelAngle;
-
-        if (!state.accelBaseSet) {
-          state.accelBase = accelAngle;
-          state.accelBaseSet = true;
-        }
-
-        const accelTilt = normalizeAngle(accelAngle - state.accelBase);
-        state.accelTiltRaw = accelTilt;
-
-        const allowAccelerometer =
-          settings.tiltSource === "accelerometer" ||
-          (settings.tiltSource === "auto" && shouldUseAccelerometer());
-
-        if (allowAccelerometer) {
-          processTilt(accelTilt, "accelerometer");
-        }
-
-        if (!usedAccelerationForShake) {
-          const gx = g.x;
-          const gy = g.y;
-          const gz = g.z;
-
-          const gravityMagnitude = Math.hypot(gx, gy, gz);
-          const deviation = Math.abs(gravityMagnitude - 9.81);
-
-          state.accTarget = deviation;
-
-          if (
-            now - state.lastShakeAt > settings.shakeCooldownMs &&
-            deviation > settings.shakeGravityDeviationThreshold
-          ) {
-            state.lastShakeAt = now;
-            doShake(deviation, "gravity-deviation", settings.shakeGravityDeviationThreshold);
-          }
-        }
-      }
-    }
-
-    async function requestSensorPermissions() {
-      const requests = [];
-      const names = [];
-
-      if (
-        typeof DeviceOrientationEvent !== "undefined" &&
-        typeof DeviceOrientationEvent.requestPermission === "function"
-      ) {
-        requests.push(DeviceOrientationEvent.requestPermission());
-        names.push("orientation");
+      if (!state.accel.has) {
+        state.accel.x = g.x;
+        state.accel.y = g.y;
+        state.accel.z = g.z;
+        state.accel.has = true;
+      } else {
+        state.accel.x += (g.x - state.accel.x) * factor;
+        state.accel.y += (g.y - state.accel.y) * factor;
+        state.accel.z += (g.z - state.accel.z) * factor;
       }
 
-      if (
-        typeof DeviceMotionEvent !== "undefined" &&
-        typeof DeviceMotionEvent.requestPermission === "function"
-      ) {
-        requests.push(DeviceMotionEvent.requestPermission());
-        names.push("motion");
+      if (!state.base.set) {
+        state.base.x = state.accel.x;
+        state.base.y = state.accel.y;
+        state.base.set = true;
       }
-
-      if (requests.length === 0) {
-        return {
-          orientationGranted: true,
-          motionGranted: true
-        };
-      }
-
-      const results = await Promise.all(requests);
-
-      let orientationGranted = true;
-      let motionGranted = true;
-
-      names.forEach((name, index) => {
-        if (name === "orientation") {
-          orientationGranted = results[index] === "granted";
-        }
-
-        if (name === "motion") {
-          motionGranted = results[index] === "granted";
-        }
-      });
-
-      return {
-        orientationGranted,
-        motionGranted
-      };
-    }
-
-    function getOrientationEventName() {
-      const requested = settings.orientationSource;
-
-      if (requested === "deviceorientation") {
-        return "deviceorientation";
-      }
-
-      if (requested === "deviceorientationabsolute") {
-        return "ondeviceorientationabsolute" in window
-          ? "deviceorientationabsolute"
-          : "deviceorientation";
-      }
-
-      return "ondeviceorientationabsolute" in window
-        ? "deviceorientationabsolute"
-        : "deviceorientation";
-    }
-
-    function attachOrientationListener() {
-      if (state.orientationEventName) {
-        window.removeEventListener(state.orientationEventName, onOrientation);
-      }
-
-      const eventName = getOrientationEventName();
-      state.orientationEventName = eventName;
-
-      window.addEventListener(eventName, onOrientation);
-
-      const fallbackNote =
-        settings.orientationSource === "deviceorientationabsolute" && eventName === "deviceorientation"
-          ? " (fallback)"
-          : "";
-
-      log(`Слушаем ориентацию: ${eventName}${fallbackNote}`, "info");
     }
 
     async function enableSensors() {
-      setStatus("Запрашиваем доступ к сенсорам...");
-      log("Запрос доступа к сенсорам...", "info");
+      if (!("DeviceMotionEvent" in window)) {
+        setStatus("DeviceMotion не поддерживается. На компьютере можно тянуть мышью или пальцем по полю.");
+        $("enableBtn").disabled = true;
+        return;
+      }
 
-      let permission;
+      setStatus("Запрашиваем доступ к датчикам движения...");
 
       try {
-        permission = await requestSensorPermissions();
+        if (typeof DeviceMotionEvent.requestPermission === "function") {
+          const result = await DeviceMotionEvent.requestPermission();
+
+          if (result !== "granted") {
+            setStatus("Доступ к движению не разрешён.");
+            return;
+          }
+        }
       } catch (error) {
         const message = error && error.message ? error.message : String(error);
-        setStatus(`Ошибка доступа к сенсорам: ${message}`);
-        log(`Ошибка доступа к сенсорам: ${message}`, "error");
+        setStatus(`Ошибка доступа: ${message}`);
         return;
       }
 
-      if (!permission.orientationGranted && !permission.motionGranted) {
-        setStatus("Доступ к сенсорам не разрешён.");
-        log("Доступ к сенсорам не разрешён.", "error");
-        return;
-      }
-
-      if (!permission.orientationGranted) {
-        log("Доступ к DeviceOrientation не разрешён.", "warn");
-      }
-
-      if (!permission.motionGranted) {
-        log("Доступ к DeviceMotion не разрешён.", "warn");
-      }
-
-      if (!("DeviceOrientationEvent" in window) && !("DeviceMotionEvent" in window)) {
-        setStatus("Браузер не поддерживает DeviceOrientation/DeviceMotion.");
-        log("Браузер не поддерживает DeviceOrientation/DeviceMotion.", "error");
-        return;
-      }
-
-      attachOrientationListener();
       window.addEventListener("devicemotion", onMotion);
 
       state.sensorsEnabled = true;
       $("enableBtn").disabled = true;
-      $("calibrateBtn").disabled = false;
 
-      setStatus("Сенсоры включены.");
-      log("Сенсоры включены.", "info");
+      setStatus("Сенсоры включены. Положи телефон на стол и нажми «Центр», если нужно.");
 
       setTimeout(() => {
-        if (!state.sensorsEnabled) return;
-
-        if (!state.gotOrientation && !state.gotMotion) {
-          setStatus("События сенсоров не приходят. Проверь доступ датчиков и HTTPS.");
-          log("События сенсоров не приходят. Проверь доступ датчиков и HTTPS.", "warn");
-        } else {
-          if (!state.gotOrientation) {
-            log("DeviceOrientation события не приходят.", "warn");
-          }
-
-          if (!state.gotMotion) {
-            log("DeviceMotion события не приходят.", "warn");
-          }
+        if (!state.gotMotion) {
+          setStatus("События DeviceMotion не приходят. Проверь доступ датчиков и HTTPS.");
         }
       }, 2500);
     }
 
-    function identityMatrix() {
-      return [
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-      ];
-    }
-
-    function transposeMatrix(m) {
-      return [
-        [m[0][0], m[1][0], m[2][0]],
-        [m[0][1], m[1][1], m[2][1]],
-        [m[0][2], m[1][2], m[2][2]]
-      ];
-    }
-
-    function normalizeVec(v) {
-      const len = Math.hypot(v.x, v.y, v.z);
-
-      if (len < 0.000001) {
-        return null;
-      }
-
-      return {
-        x: v.x / len,
-        y: v.y / len,
-        z: v.z / len
-      };
-    }
-
-    function dotVec(a, b) {
-      return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
-
-    function crossVec(a, b) {
-      return {
-        x: a.y * b.z - a.z * b.y,
-        y: a.z * b.x - a.x * b.z,
-        z: a.x * b.y - a.y * b.x
-      };
-    }
-
-    function axisAngleMatrix(axis, angle) {
-      const x = axis.x;
-      const y = axis.y;
-      const z = axis.z;
-
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
-      const t = 1 - c;
-
-      return [
-        [
-          t * x * x + c,
-          t * x * y - s * z,
-          t * x * z + s * y
-        ],
-        [
-          t * x * y + s * z,
-          t * y * y + c,
-          t * y * z - s * x
-        ],
-        [
-          t * x * z - s * y,
-          t * y * z + s * x,
-          t * z * z + c
-        ]
-      ];
-    }
-
-    function matrixFromVectors(from, to) {
-      const v = normalizeVec(from);
-      const t = normalizeVec(to);
-
-      if (!v || !t) {
-        return identityMatrix();
-      }
-
-      const d = clamp(dotVec(v, t), -1, 1);
-
-      if (d > 0.99999) {
-        return identityMatrix();
-      }
-
-      if (d < -0.99999) {
-        return axisAngleMatrix({ x: 1, y: 0, z: 0 }, Math.PI);
-      }
-
-      const axis = normalizeVec(crossVec(v, t));
-
-      if (!axis) {
-        return identityMatrix();
-      }
-
-      const angle = Math.acos(d);
-      return axisAngleMatrix(axis, angle);
-    }
-
-    function getCurrentAccelMatrix() {
-      if (!state.accel.has) {
-        return identityMatrix();
-      }
-
-      const vec = getAccelVector();
-      const up = { x: 0, y: 1, z: 0 };
-
-      return matrixFromVectors(vec, up);
-    }
-
-    function getCurrentAccelVisualMatrix() {
-      const current = getCurrentAccelMatrix();
-
-      if (settings.relativeVisual) {
-        if (!state.baseAccelMatrix) {
-          state.baseAccelMatrix = current;
-        }
-
-        return multiplyMatrices(current, transposeMatrix(state.baseAccelMatrix));
-      }
-
-      return current;
-    }
-
     function calibrateCenter() {
-      if (!state.gotOrientation && !state.accel.has) {
-        log("Нет данных для калибровки.", "warn");
+      if (!state.accel.has) {
+        setStatus("Нет данных акселерометра для калибровки.");
         return;
       }
 
-      if (state.gotOrientation) {
-        state.base.alpha = state.raw.alpha;
-        state.base.beta = state.raw.beta;
-        state.base.gamma = state.raw.gamma;
-        state.base.set = true;
-      }
+      state.base.x = state.accel.x;
+      state.base.y = state.accel.y;
+      state.base.set = true;
 
-      if (state.accel.has) {
-        state.accelBase = state.accelAngle;
-        state.accelBaseSet = true;
-        state.baseAccelMatrix = getCurrentAccelMatrix();
-      }
-
-      resetTiltState();
-
-      log("Центр откалиброван.", "info");
-      setStatus("Центр откалиброван.");
+      setStatus("Текущее положение телефона принято за центр.");
     }
 
-    function bindRange(id, key, formatter = (value) => String(value)) {
+    function bindRange(id, key, formatter, onChange) {
       const input = $(id);
       const output = $(`${id}Value`);
 
       const update = () => {
         settings[key] = parseFloat(input.value);
         output.textContent = formatter(settings[key]);
+
+        if (onChange) onChange();
       };
 
       input.addEventListener("input", update);
       update();
     }
 
-    function bindCheckbox(id, key, onChange) {
+    function bindCheckbox(id, key) {
       const input = $(id);
 
       const update = () => {
         settings[key] = input.checked;
-        if (onChange) onChange();
       };
 
       input.addEventListener("change", update);
       update();
     }
 
-    function bindSelect(id, key, onChange) {
-      const el = $(id);
+    bindRange("sensitivity", "sensitivity", (v) => String(Math.round(v)));
+    bindRange("friction", "friction", (v) => v.toFixed(1));
+    bindRange("restitution", "restitution", (v) => v.toFixed(2));
+    bindRange("deadZone", "deadZone", (v) => v.toFixed(2));
+    bindRange("sensorFilter", "sensorFilter", (v) => v.toFixed(2));
+    bindRange("radius", "radius", (v) => `${Math.round(v)} px`, clampBall);
+    bindRange("maxSpeed", "maxSpeed", (v) => `${Math.round(v)} px/s`);
 
-      el.value = settings[key];
-
-      el.addEventListener("change", () => {
-        settings[key] = el.value;
-
-        if (onChange) onChange();
-
-        log(`Настройка ${id}: ${settings[key]}`, "info");
-      });
-    }
-
-    const fmtDeg = (value) => `${Math.round(value)}°`;
-    const fmtMs = (value) => `${Math.round(value)} ms`;
-    const fmtNum1 = (value) => value.toFixed(1);
-    const fmtNum2 = (value) => value.toFixed(2);
-
-    bindRange("tiltThreshold", "tiltThreshold", fmtDeg);
-    bindRange("tiltResetThreshold", "tiltResetThreshold", fmtDeg);
-    bindRange("tiltCooldownMs", "tiltCooldownMs", fmtMs);
-    bindRange("tiltDebounceMs", "tiltDebounceMs", fmtMs);
-    bindRange("actionFilter", "actionFilter", fmtNum2);
-    bindRange("shakeAccelThreshold", "shakeAccelThreshold", fmtNum1);
-    bindRange("shakeGravityDeviationThreshold", "shakeGravityDeviationThreshold", fmtNum1);
-    bindRange("shakeCooldownMs", "shakeCooldownMs", fmtMs);
-    bindRange("smoothing", "smoothing", fmtNum2);
-    bindRange("visualScale", "visualScale", fmtNum2);
-    bindRange("viewYaw", "viewYaw", fmtDeg);
-    bindRange("viewPitch", "viewPitch", fmtDeg);
-
-    function resetAccelRelated() {
-      state.accelBaseSet = false;
-      state.baseAccelMatrix = null;
-      resetTiltState();
-    }
-
-    bindCheckbox("accelVisual", "accelVisual");
-    bindCheckbox("accelInvertX", "accelInvertX", resetAccelRelated);
-    bindCheckbox("accelInvertY", "accelInvertY", resetAccelRelated);
-    bindCheckbox("accelInvertZ", "accelInvertZ", resetAccelRelated);
-
-    bindCheckbox("relativeVisual", "relativeVisual", () => {
-      state.baseAccelMatrix = null;
-      resetTiltState();
-    });
-
-    bindCheckbox("invertTiltAction", "invertTiltAction");
-    bindCheckbox("ignoreAlpha", "ignoreAlpha");
-    bindCheckbox("stabilizeVertical", "stabilizeVertical");
-    bindCheckbox("invertAlpha", "invertAlpha");
-    bindCheckbox("invertBeta", "invertBeta");
-    bindCheckbox("invertGamma", "invertGamma");
-
-    bindSelect("tiltAxis", "tiltAxis", () => {
-      resetTiltState();
-    });
-
-    bindSelect("tiltSource", "tiltSource", () => {
-      resetTiltState();
-    });
-
-    bindSelect("orientationSource", "orientationSource", () => {
-      if (state.sensorsEnabled) {
-        attachOrientationListener();
-      }
-    });
+    bindCheckbox("invertX", "invertX");
+    bindCheckbox("invertY", "invertY");
 
     $("enableBtn").addEventListener("click", enableSensors);
-    $("calibrateBtn").addEventListener("click", calibrateCenter);
+    $("centerBtn").addEventListener("click", calibrateCenter);
+    $("resetBtn").addEventListener("click", resetBall);
 
-    $("clearLogBtn").addEventListener("click", () => {
-      $("log").innerHTML = "";
-      log("Лог очищен.", "info");
-    });
-
-    $("testTiltBtn").addEventListener("click", () => {
-      const value = Math.abs(state.currentTilt) > 0.1
-        ? state.currentTilt
-        : settings.tiltThreshold + 1;
-
-      doTilt("RIGHT", value, "test");
-    });
-
-    $("testShakeBtn").addEventListener("click", () => {
-      doShake(settings.shakeAccelThreshold + 1, "test", settings.shakeAccelThreshold);
-    });
-
-    window.addEventListener("orientationchange", () => {
-      const axis = getActiveAxis();
-      state.activeAxis = axis;
-      resetTiltState();
-      log(`Ориентация экрана изменилась: ${getScreenAngle()}°, активная ось: ${axis}`, "info");
-    });
-
-    function resizeCanvas() {
+    function updatePointer(event) {
       const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
 
-      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
 
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      state.pointer.x = nx * 9.81;
+      state.pointer.y = ny * 9.81;
     }
 
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
+    canvas.addEventListener("pointerdown", (event) => {
+      state.pointer.active = true;
+      canvas.setPointerCapture(event.pointerId);
+      updatePointer(event);
+    });
 
-    function rotatePointY(point, angle) {
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
+    canvas.addEventListener("pointermove", (event) => {
+      if (state.pointer.active) {
+        updatePointer(event);
+      }
+    });
 
-      return {
-        x: point.x * c + point.z * s,
-        y: point.y,
-        z: -point.x * s + point.z * c
-      };
-    }
+    canvas.addEventListener("pointerup", () => {
+      state.pointer.active = false;
+    });
 
-    function rotatePointX(point, angle) {
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
+    canvas.addEventListener("pointercancel", () => {
+      state.pointer.active = false;
+    });
 
-      return {
-        x: point.x,
-        y: point.y * c - point.z * s,
-        z: point.y * s + point.z * c
-      };
-    }
+    function physics(dt) {
+      const tilt = getTilt();
 
-    let currentScale = 100;
+      state.currentAccel.x = tilt.x;
+      state.currentAccel.y = tilt.y;
+      state.source = tilt.source;
 
-    function project(point) {
-      let p = rotatePointY(point, deg2rad(settings.viewYaw));
-      p = rotatePointX(p, deg2rad(settings.viewPitch));
+      const ax = tilt.x * settings.sensitivity;
+      const ay = tilt.y * settings.sensitivity;
 
-      const cameraDistance = 5;
-      const focal = 4.5;
+      ball.vx += ax * dt;
+      ball.vy += ay * dt;
 
-      const z = p.z + cameraDistance;
-      const scale = focal / Math.max(0.1, z) * currentScale;
+      const damping = Math.exp(-settings.friction * dt);
+      ball.vx *= damping;
+      ball.vy *= damping;
 
-      return {
-        x: p.x * scale,
-        y: -p.y * scale,
-        z
-      };
-    }
+      let speed = Math.hypot(ball.vx, ball.vy);
 
-    function drawLine(a, b, color, alpha = 1, width = 2) {
-      const p1 = project(a);
-      const p2 = project(b);
-
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    function drawArrow(a, b, color, label = "", width = 2) {
-      const p1 = project(a);
-      const p2 = project(b);
-
-      ctx.save();
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = width;
-
-      ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
-      ctx.stroke();
-
-      const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-      const size = 10;
-
-      ctx.beginPath();
-      ctx.moveTo(p2.x, p2.y);
-      ctx.lineTo(
-        p2.x - size * Math.cos(angle - Math.PI / 6),
-        p2.y - size * Math.sin(angle - Math.PI / 6)
-      );
-      ctx.lineTo(
-        p2.x - size * Math.cos(angle + Math.PI / 6),
-        p2.y - size * Math.sin(angle + Math.PI / 6)
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      if (label) {
-        ctx.font = "12px system-ui, sans-serif";
-        ctx.fillText(label, p2.x + 10, p2.y - 7);
+      if (speed > settings.maxSpeed) {
+        const scale = settings.maxSpeed / speed;
+        ball.vx *= scale;
+        ball.vy *= scale;
+        speed = settings.maxSpeed;
       }
 
-      ctx.restore();
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      const r = settings.radius;
+
+      if (ball.x < r) {
+        ball.x = r;
+        ball.vx = Math.abs(ball.vx) * settings.restitution;
+      }
+
+      if (ball.x > cssW - r) {
+        ball.x = cssW - r;
+        ball.vx = -Math.abs(ball.vx) * settings.restitution;
+      }
+
+      if (ball.y < r) {
+        ball.y = r;
+        ball.vy = Math.abs(ball.vy) * settings.restitution;
+      }
+
+      if (ball.y > cssH - r) {
+        ball.y = cssH - r;
+        ball.vy = -Math.abs(ball.vy) * settings.restitution;
+      }
+
+      // Смещение текстуры для иллюзии качения.
+      ball.texX -= ball.vx * dt;
+      ball.texY -= ball.vy * dt;
+
+      return speed;
     }
 
-    function drawAxes() {
-      const origin = { x: 0, y: 0, z: 0 };
-      const length = 1.6;
+    function drawBall() {
+      const x = ball.x;
+      const y = ball.y;
+      const r = settings.radius;
 
-      drawLine(origin, { x: -length, y: 0, z: 0 }, "#f87171", 0.22, 1);
-      drawLine(origin, { x: 0, y: -length, z: 0 }, "#4ade80", 0.22, 1);
-      drawLine(origin, { x: 0, y: 0, z: -length }, "#60a5fa", 0.22, 1);
+      ctx.save();
 
-      drawArrow(origin, { x: length, y: 0, z: 0 }, "#f87171", "X");
-      drawArrow(origin, { x: 0, y: length, z: 0 }, "#4ade80", "Y");
-      drawArrow(origin, { x: 0, y: 0, z: length }, "#60a5fa", "Z");
-    }
+      // Тень/нижний слой.
+      ctx.beginPath();
+      ctx.ellipse(x, y + r * 0.85, r * 0.9, r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+      ctx.fill();
 
-    function matrixRotX(angle) {
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
+      // Обрезка по кругу.
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.clip();
 
-      return [
-        [1, 0, 0],
-        [0, c, -s],
-        [0, s, c]
-      ];
-    }
+      // Основной градиент шарика.
+      const gradient = ctx.createRadialGradient(
+        x - r * 0.35,
+        y - r * 0.35,
+        r * 0.1,
+        x,
+        y,
+        r
+      );
 
-    function matrixRotY(angle) {
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
+      gradient.addColorStop(0, "#fb923c");
+      gradient.addColorStop(0.55, "#f97316");
+      gradient.addColorStop(1, "#7c2d12");
 
-      return [
-        [c, 0, s],
-        [0, 1, 0],
-        [-s, 0, c]
-      ];
-    }
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
 
-    function matrixRotZ(angle) {
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
+      // Катящаяся текстура.
+      const spacing = Math.max(7, r * 0.8);
+      const ox = mod(ball.texX, spacing);
+      const oy = mod(ball.texY, spacing);
 
-      return [
-        [c, -s, 0],
-        [s, c, 0],
-        [0, 0, 1]
-      ];
-    }
+      ctx.fillStyle = "rgba(255, 255, 255, 0.20)";
 
-    function multiplyMatrices(a, b) {
-      const result = [
-        [0, 0, 0],
-        [0, 0, 0],
-        [0, 0, 0]
-      ];
+      for (let px = -spacing; px <= r * 2 + spacing; px += spacing) {
+        for (let py = -spacing; py <= r * 2 + spacing; py += spacing) {
+          const dx = px + ox - r;
+          const dy = py + oy - r;
 
-      for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-          for (let k = 0; k < 3; k++) {
-            result[i][j] += a[i][k] * b[k][j];
+          if (Math.hypot(dx, dy) <= r * 0.92) {
+            ctx.beginPath();
+            ctx.arc(x + dx, y + dy, r * 0.12, 0, Math.PI * 2);
+            ctx.fill();
           }
         }
       }
 
-      return result;
-    }
-
-    function applyMatrix(matrix, point) {
-      return {
-        x: matrix[0][0] * point.x + matrix[0][1] * point.y + matrix[0][2] * point.z,
-        y: matrix[1][0] * point.x + matrix[1][1] * point.y + matrix[1][2] * point.z,
-        z: matrix[2][0] * point.x + matrix[2][1] * point.y + matrix[2][2] * point.z
-      };
-    }
-
-    function getOrientationMatrix() {
-      if (settings.accelVisual && state.accel.has) {
-        return getCurrentAccelVisualMatrix();
-      }
-
-      let alpha = state.display.alpha;
-      let beta = state.display.beta;
-      let gamma = state.display.gamma;
-
-      if (settings.relativeVisual && state.base.set) {
-        alpha = normalizeAngle(alpha - state.base.alpha);
-        beta = normalizeAngle(beta - state.base.beta);
-        gamma = normalizeAngle(gamma - state.base.gamma);
-      }
-
-      if (settings.ignoreAlpha) {
-        alpha = 0;
-      }
-
-      if (settings.stabilizeVertical) {
-        const betaAbs = Math.abs(normalizeAngle(beta));
-        const nearVertical = Math.max(0, Math.min(1, (betaAbs - 55) / 35));
-
-        gamma *= (1 - 0.55 * nearVertical);
-
-        if (!settings.ignoreAlpha) {
-          alpha *= (1 - 0.75 * nearVertical);
-        }
-      }
-
-      if (settings.invertAlpha) alpha = -alpha;
-      if (settings.invertBeta) beta = -beta;
-      if (settings.invertGamma) gamma = -gamma;
-
-      const alphaRad = deg2rad(alpha);
-      const betaRad = deg2rad(beta);
-      const gammaRad = deg2rad(gamma);
-
-      return multiplyMatrices(
-        matrixRotY(alphaRad),
-        multiplyMatrices(
-          matrixRotX(betaRad),
-          matrixRotZ(-gammaRad)
-        )
-      );
-    }
-
-    function drawPhone() {
-      const matrix = getOrientationMatrix();
-
-      const width = 0.8;
-      const height = 1.6;
-
-      const cornersLocal = [
-        { x: -width / 2, y: -height / 2, z: 0 },
-        { x: width / 2, y: -height / 2, z: 0 },
-        { x: width / 2, y: height / 2, z: 0 },
-        { x: -width / 2, y: height / 2, z: 0 }
-      ];
-
-      const projected = cornersLocal.map((point) => project(applyMatrix(matrix, point)));
-
-      ctx.save();
-      ctx.beginPath();
-
-      projected.forEach((point, index) => {
-        if (index === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
-      });
-
-      ctx.closePath();
-
-      ctx.fillStyle = "rgba(96, 165, 250, 0.22)";
-      ctx.fill();
-
-      ctx.strokeStyle = "#93c5fd";
-      ctx.lineWidth = 2;
-      ctx.stroke();
       ctx.restore();
 
-      const centerWorld = applyMatrix(matrix, { x: 0, y: 0, z: 0 });
-      const topWorld = applyMatrix(matrix, { x: 0, y: height / 2 + 0.35, z: 0 });
-      const normalWorld = applyMatrix(matrix, { x: 0, y: 0, z: 0.55 });
+      // Контур.
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
 
-      drawArrow(centerWorld, topWorld, "#fbbf24", "TOP", 2);
-      drawArrow(centerWorld, normalWorld, "#38bdf8", "N", 1.5);
+      // Блик.
+      ctx.beginPath();
+      ctx.arc(x - r * 0.32, y - r * 0.34, r * 0.18, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+      ctx.fill();
     }
 
     function draw() {
-      const rect = canvas.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
+      ctx.clearRect(0, 0, cssW, cssH);
 
-      ctx.clearRect(0, 0, width, height);
-      ctx.save();
-      ctx.translate(width / 2, height / 2);
-
-      currentScale = Math.min(width, height) / 4 * settings.visualScale;
-
-      drawAxes();
-      drawPhone();
-
-      ctx.restore();
+      drawBall();
     }
 
-    function updateValues() {
-      $("valAlpha").textContent = `${normalizeAngle(state.display.alpha).toFixed(1)}°`;
-      $("valBeta").textContent = `${normalizeAngle(state.display.beta).toFixed(1)}°`;
-      $("valGamma").textContent = `${normalizeAngle(state.display.gamma).toFixed(1)}°`;
-      $("valTilt").textContent = `${state.currentTilt.toFixed(1)}°`;
-      $("valAcc").textContent = state.display.accMag.toFixed(2);
-      $("valAxis").textContent = state.activeAxis;
-      $("valSource").textContent = state.lastTiltSource || "-";
-      $("valArmed").textContent = state.tiltArmed ? "armed" : "blocked";
+    function updateValues(speed) {
+      $("valTiltX").textContent = state.currentAccel.x.toFixed(2);
+      $("valTiltY").textContent = state.currentAccel.y.toFixed(2);
+      $("valSpeed").textContent = `${Math.round(speed)} px/s`;
+      $("valSource").textContent = state.source;
     }
 
-    function animate() {
-      const factor = Math.max(0.0001, 1 - settings.smoothing);
+    let lastTime = performance.now();
 
-      state.display.alpha = smoothAngle(state.display.alpha, state.raw.alpha, factor);
-      state.display.beta = smoothAngle(state.display.beta, state.raw.beta, factor);
-      state.display.gamma = smoothAngle(state.display.gamma, state.raw.gamma, factor);
+    function frame(now) {
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
 
-      state.display.accMag += (state.accTarget - state.display.accMag) * factor;
+      let speed = 0;
 
-      updateValues();
-      draw();
+      if (cssW > 0 && cssH > 0) {
+        speed = physics(dt);
+        draw();
+      }
 
-      requestAnimationFrame(animate);
+      updateValues(speed);
+
+      requestAnimationFrame(frame);
     }
 
-    log("Страница готова. Нажми «Включить сенсоры».", "info");
-    animate();
+    window.addEventListener("resize", resizeCanvas);
+
+    resizeCanvas();
+    requestAnimationFrame(frame);
   </script>
 </body>
 </html>
