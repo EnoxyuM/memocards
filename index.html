@@ -279,8 +279,9 @@
   <main>
     <h1>Debug DeviceOrientation / DeviceMotion</h1>
     <p class="subtitle">
-      Нажми «Включить сенсоры» и, если браузер спросит, разреши доступ.
-      3D-прямоугольник показывает ориентацию телефона. Наклон и встряхивание пишутся в лог действиями.
+      Нажми «Включить сенсоры» и разреши доступ, если браузер спросит.
+      Если возле вертикали появляются ложные срабатывания, используй фильтр, debounce,
+      режим наклона «accelerometer» или «auto».
     </p>
 
     <div class="toolbar">
@@ -305,6 +306,7 @@
       <div class="value"><span>tilt</span><b id="valTilt">0.0°</b></div>
       <div class="value"><span>accel / deviation</span><b id="valAcc">0.00</b></div>
       <div class="value"><span>active axis</span><b id="valAxis">gamma</b></div>
+      <div class="value"><span>tilt source</span><b id="valSource">-</b></div>
       <div class="value"><span>tilt armed</span><b id="valArmed">armed</b></div>
     </div>
 
@@ -337,6 +339,22 @@
         </div>
 
         <div class="setting">
+          <label for="tiltDebounceMs">
+            Подтверждение наклона, debounce
+            <output id="tiltDebounceMsValue">180 ms</output>
+          </label>
+          <input id="tiltDebounceMs" type="range" min="0" max="1000" step="10" value="180" />
+        </div>
+
+        <div class="setting">
+          <label for="actionFilter">
+            Фильтр наклона, сильнее = стабильнее
+            <output id="actionFilterValue">0.55</output>
+          </label>
+          <input id="actionFilter" type="range" min="0" max="0.95" step="0.01" value="0.55" />
+        </div>
+
+        <div class="setting">
           <label for="shakeAccelThreshold">
             Порог встряхивания для acceleration
             <output id="shakeAccelThresholdValue">11.0</output>
@@ -363,9 +381,9 @@
         <div class="setting">
           <label for="smoothing">
             Сглаживание 3D-вида
-            <output id="smoothingValue">0.35</output>
+            <output id="smoothingValue">0.65</output>
           </label>
-          <input id="smoothing" type="range" min="0" max="0.95" step="0.01" value="0.35" />
+          <input id="smoothing" type="range" min="0" max="0.95" step="0.01" value="0.65" />
         </div>
 
         <div class="setting">
@@ -401,6 +419,24 @@
           </select>
         </div>
 
+        <div class="setting">
+          <label for="tiltSource">Источник наклона</label>
+          <select id="tiltSource">
+            <option value="auto">auto</option>
+            <option value="orientation">orientation</option>
+            <option value="accelerometer">accelerometer</option>
+          </select>
+        </div>
+
+        <div class="setting">
+          <label for="orientationSource">Событие ориентации</label>
+          <select id="orientationSource">
+            <option value="auto">auto</option>
+            <option value="deviceorientation">deviceorientation</option>
+            <option value="deviceorientationabsolute">deviceorientationabsolute</option>
+          </select>
+        </div>
+
         <div class="checkbox-grid">
           <label class="checkbox">
             <input type="checkbox" id="invertTiltAction" />
@@ -410,6 +446,16 @@
           <label class="checkbox">
             <input type="checkbox" id="relativeVisual" checked />
             Относительный 3D-режим от кнопки «Центр»
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="ignoreAlpha" checked />
+            Игнорировать alpha в 3D
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="stabilizeVertical" checked />
+            Стабилизировать 3D возле вертикали
           </label>
 
           <label class="checkbox">
@@ -436,8 +482,8 @@
     </section>
 
     <p class="footer-note">
-      Если направления кажутся неправильными, используй чекбоксы инверсии или кнопку «Центр».
-      На Android обычно не нужен отдельный запрос разрешения, на iOS запрос появится после нажатия кнопки.
+      Если возле вертикали всё равно есть дёргание: увеличь «Фильтр наклона» и «Подтверждение наклона»,
+      либо переведи «Источник наклона» в `accelerometer`. Также можно попробовать `deviceorientationabsolute`.
     </p>
   </main>
 
@@ -453,16 +499,26 @@
       tiltThreshold: 25,
       tiltResetThreshold: 10,
       tiltCooldownMs: 700,
+      tiltDebounceMs: 180,
+      actionFilter: 0.55,
+
       shakeAccelThreshold: 11,
       shakeGravityDeviationThreshold: 8,
       shakeCooldownMs: 900,
-      smoothing: 0.35,
+
+      smoothing: 0.65,
       visualScale: 1,
       viewYaw: -25,
       viewPitch: -25,
+
       tiltAxis: "auto",
+      tiltSource: "auto",
+      orientationSource: "auto",
+
       invertTiltAction: false,
       relativeVisual: true,
+      ignoreAlpha: true,
+      stabilizeVertical: true,
       invertAlpha: false,
       invertBeta: false,
       invertGamma: false
@@ -493,13 +549,36 @@
         set: false
       },
 
-      accTarget: 0,
-      currentTilt: 0,
+      orientationEventName: null,
+
       activeAxis: "gamma",
+      currentTilt: 0,
+      lastTiltSource: "-",
+      lastTiltSourceKey: "",
+      filteredTilt: 0,
+
+      pendingTiltDirection: null,
+      pendingTiltSince: 0,
 
       tiltArmed: true,
       lastTiltAt: 0,
-      lastShakeAt: 0
+      lastShakeAt: 0,
+
+      accTarget: 0,
+
+      accel: {
+        x: 0,
+        y: 0,
+        z: 0,
+        has: false
+      },
+
+      accelAxis: null,
+      accelAngle: 0,
+      accelBase: 0,
+      accelBaseSet: false,
+      accelTiltRaw: 0,
+      orientationTiltRaw: 0
     };
 
     function setStatus(text) {
@@ -510,6 +589,7 @@
       const logEl = $("log");
       const line = document.createElement("div");
       const time = new Date().toLocaleTimeString("ru-RU");
+
       line.className = `log-line ${type}`;
       line.textContent = `[${time}] ${message}`;
       logEl.prepend(line);
@@ -537,6 +617,7 @@
       let a = value % 360;
       if (a <= -180) a += 360;
       if (a > 180) a -= 360;
+
       return a;
     }
 
@@ -570,6 +651,16 @@
       return screenAngle % 180 === 0 ? "gamma" : "beta";
     }
 
+    function shouldUseAccelerometer() {
+      if (settings.tiltSource === "accelerometer") return true;
+      if (settings.tiltSource === "orientation") return false;
+
+      if (!state.accel.has) return false;
+
+      const betaAbs = Math.abs(normalizeAngle(state.raw.beta));
+      return betaAbs > 55 && betaAbs < 125;
+    }
+
     function doTilt(direction, value, source = "sensor") {
       let dir = direction;
 
@@ -594,6 +685,71 @@
       flashAction("SHAKE");
     }
 
+    function resetTiltState() {
+      state.lastTiltSourceKey = "";
+      state.filteredTilt = 0;
+      state.pendingTiltDirection = null;
+      state.pendingTiltSince = Date.now();
+      state.tiltArmed = true;
+      state.currentTilt = 0;
+    }
+
+    function processTilt(rawTilt, source) {
+      const axis = state.activeAxis;
+      const key = `${source}:${axis}`;
+
+      if (state.lastTiltSourceKey !== key) {
+        state.lastTiltSourceKey = key;
+        state.filteredTilt = rawTilt;
+        state.pendingTiltDirection = null;
+        state.pendingTiltSince = Date.now();
+      }
+
+      const factor = Math.max(0.0001, 1 - settings.actionFilter);
+      state.filteredTilt = smoothAngle(state.filteredTilt, rawTilt, factor);
+
+      const tilt = state.filteredTilt;
+      state.currentTilt = tilt;
+      state.lastTiltSource = source;
+
+      const now = Date.now();
+
+      let direction = null;
+
+      if (tilt > settings.tiltThreshold) {
+        direction = "RIGHT";
+      } else if (tilt < -settings.tiltThreshold) {
+        direction = "LEFT";
+      }
+
+      if (direction) {
+        if (state.pendingTiltDirection === direction) {
+          const stableFor = now - state.pendingTiltSince;
+          const canFire =
+            stableFor >= settings.tiltDebounceMs &&
+            state.tiltArmed &&
+            now - state.lastTiltAt > settings.tiltCooldownMs;
+
+          if (canFire) {
+            doTilt(direction, tilt, source);
+            state.tiltArmed = false;
+            state.lastTiltAt = now;
+            state.pendingTiltDirection = null;
+          }
+        } else {
+          state.pendingTiltDirection = direction;
+          state.pendingTiltSince = now;
+        }
+      } else {
+        state.pendingTiltDirection = null;
+        state.pendingTiltSince = now;
+      }
+
+      if (Math.abs(tilt) < settings.tiltResetThreshold) {
+        state.tiltArmed = true;
+      }
+    }
+
     function onOrientation(event) {
       if (!state.sensorsEnabled) return;
 
@@ -615,31 +771,21 @@
         log("Автокалибровка базового положения. Нажми «Центр», если нужно переопределить.", "info");
       }
 
-      const axis = getActiveAxis();
-      state.activeAxis = axis;
+      state.activeAxis = getActiveAxis();
 
-      const current = axis === "beta" ? beta : gamma;
-      const base = axis === "beta" ? state.base.beta : state.base.gamma;
-      const tilt = normalizeAngle(current - base);
+      const current = state.activeAxis === "beta" ? beta : gamma;
+      const base = state.activeAxis === "beta" ? state.base.beta : state.base.gamma;
+      const orientationTilt = normalizeAngle(current - base);
 
-      state.currentTilt = tilt;
+      state.orientationTiltRaw = orientationTilt;
 
-      const now = Date.now();
+      const useAccelerometer = shouldUseAccelerometer();
+      const allowOrientation =
+        settings.tiltSource === "orientation" ||
+        (settings.tiltSource === "auto" && (!useAccelerometer || !state.accel.has));
 
-      if (state.tiltArmed && now - state.lastTiltAt > settings.tiltCooldownMs) {
-        if (tilt > settings.tiltThreshold) {
-          doTilt("RIGHT", tilt);
-          state.tiltArmed = false;
-          state.lastTiltAt = now;
-        } else if (tilt < -settings.tiltThreshold) {
-          doTilt("LEFT", tilt);
-          state.tiltArmed = false;
-          state.lastTiltAt = now;
-        }
-      }
-
-      if (Math.abs(tilt) < settings.tiltResetThreshold) {
-        state.tiltArmed = true;
+      if (allowOrientation) {
+        processTilt(orientationTilt, "orientation");
       }
     }
 
@@ -649,6 +795,7 @@
       state.gotMotion = true;
 
       const now = Date.now();
+      let usedAccelerationForShake = false;
 
       if (validXYZ(event.acceleration)) {
         const x = event.acceleration.x;
@@ -657,31 +804,87 @@
 
         const magnitude = Math.hypot(x, y, z);
         state.accTarget = magnitude;
-
-        if (now - state.lastShakeAt > settings.shakeCooldownMs && magnitude > settings.shakeAccelThreshold) {
-          state.lastShakeAt = now;
-          doShake(magnitude, "acceleration", settings.shakeAccelThreshold);
-        }
-
-        return;
-      }
-
-      if (validXYZ(event.accelerationIncludingGravity)) {
-        const x = event.accelerationIncludingGravity.x;
-        const y = event.accelerationIncludingGravity.y;
-        const z = event.accelerationIncludingGravity.z;
-
-        const magnitude = Math.hypot(x, y, z);
-        const deviation = Math.abs(magnitude - 9.81);
-
-        state.accTarget = deviation;
+        usedAccelerationForShake = true;
 
         if (
           now - state.lastShakeAt > settings.shakeCooldownMs &&
-          deviation > settings.shakeGravityDeviationThreshold
+          magnitude > settings.shakeAccelThreshold
         ) {
           state.lastShakeAt = now;
-          doShake(deviation, "gravity-deviation", settings.shakeGravityDeviationThreshold);
+          doShake(magnitude, "acceleration", settings.shakeAccelThreshold);
+        }
+      }
+
+      if (validXYZ(event.accelerationIncludingGravity)) {
+        const g = event.accelerationIncludingGravity;
+
+        const factor = Math.max(0.0001, 1 - settings.actionFilter);
+
+        if (!state.accel.has) {
+          state.accel.x = g.x;
+          state.accel.y = g.y;
+          state.accel.z = g.z;
+          state.accel.has = true;
+        } else {
+          state.accel.x += (g.x - state.accel.x) * factor;
+          state.accel.y += (g.y - state.accel.y) * factor;
+          state.accel.z += (g.z - state.accel.z) * factor;
+        }
+
+        state.activeAxis = getActiveAxis();
+
+        if (state.accelAxis !== state.activeAxis) {
+          state.accelAxis = state.activeAxis;
+          state.accelBaseSet = false;
+        }
+
+        const ax = state.accel.x;
+        const ay = state.accel.y;
+        const az = state.accel.z;
+
+        let accelAngle;
+
+        if (state.activeAxis === "beta") {
+          accelAngle = Math.atan2(ay, Math.hypot(ax, az)) * 180 / Math.PI;
+        } else {
+          accelAngle = Math.atan2(ax, Math.hypot(ay, az)) * 180 / Math.PI;
+        }
+
+        state.accelAngle = accelAngle;
+
+        if (!state.accelBaseSet) {
+          state.accelBase = accelAngle;
+          state.accelBaseSet = true;
+        }
+
+        const accelTilt = normalizeAngle(accelAngle - state.accelBase);
+        state.accelTiltRaw = accelTilt;
+
+        const allowAccelerometer =
+          settings.tiltSource === "accelerometer" ||
+          (settings.tiltSource === "auto" && shouldUseAccelerometer());
+
+        if (allowAccelerometer) {
+          processTilt(accelTilt, "accelerometer");
+        }
+
+        if (!usedAccelerationForShake) {
+          const gx = g.x;
+          const gy = g.y;
+          const gz = g.z;
+
+          const gravityMagnitude = Math.hypot(gx, gy, gz);
+          const deviation = Math.abs(gravityMagnitude - 9.81);
+
+          state.accTarget = deviation;
+
+          if (
+            now - state.lastShakeAt > settings.shakeCooldownMs &&
+            deviation > settings.shakeGravityDeviationThreshold
+          ) {
+            state.lastShakeAt = now;
+            doShake(deviation, "gravity-deviation", settings.shakeGravityDeviationThreshold);
+          }
         }
       }
     }
@@ -734,6 +937,42 @@
       };
     }
 
+    function getOrientationEventName() {
+      const requested = settings.orientationSource;
+
+      if (requested === "deviceorientation") {
+        return "deviceorientation";
+      }
+
+      if (requested === "deviceorientationabsolute") {
+        return "ondeviceorientationabsolute" in window
+          ? "deviceorientationabsolute"
+          : "deviceorientation";
+      }
+
+      return "ondeviceorientationabsolute" in window
+        ? "deviceorientationabsolute"
+        : "deviceorientation";
+    }
+
+    function attachOrientationListener() {
+      if (state.orientationEventName) {
+        window.removeEventListener(state.orientationEventName, onOrientation);
+      }
+
+      const eventName = getOrientationEventName();
+      state.orientationEventName = eventName;
+
+      window.addEventListener(eventName, onOrientation);
+
+      const fallbackNote =
+        settings.orientationSource === "deviceorientationabsolute" && eventName === "deviceorientation"
+          ? " (fallback)"
+          : "";
+
+      log(`Слушаем ориентацию: ${eventName}${fallbackNote}`, "info");
+    }
+
     async function enableSensors() {
       setStatus("Запрашиваем доступ к сенсорам...");
       log("Запрос доступа к сенсорам...", "info");
@@ -769,7 +1008,7 @@
         return;
       }
 
-      window.addEventListener("deviceorientation", onOrientation);
+      attachOrientationListener();
       window.addEventListener("devicemotion", onMotion);
 
       state.sensorsEnabled = true;
@@ -798,18 +1037,24 @@
     }
 
     function calibrateCenter() {
-      if (!state.gotOrientation) {
-        log("Нет данных DeviceOrientation для калибровки.", "warn");
+      if (!state.gotOrientation && !state.accel.has) {
+        log("Нет данных для калибровки.", "warn");
         return;
       }
 
-      state.base.alpha = state.raw.alpha;
-      state.base.beta = state.raw.beta;
-      state.base.gamma = state.raw.gamma;
-      state.base.set = true;
+      if (state.gotOrientation) {
+        state.base.alpha = state.raw.alpha;
+        state.base.beta = state.raw.beta;
+        state.base.gamma = state.raw.gamma;
+        state.base.set = true;
+      }
 
-      state.currentTilt = 0;
-      state.tiltArmed = true;
+      if (state.accel.has) {
+        state.accelBase = state.accelAngle;
+        state.accelBaseSet = true;
+      }
+
+      resetTiltState();
 
       log("Центр откалиброван.", "info");
       setStatus("Центр откалиброван.");
@@ -839,6 +1084,20 @@
       update();
     }
 
+    function bindSelect(id, key, onChange) {
+      const el = $(id);
+
+      el.value = settings[key];
+
+      el.addEventListener("change", () => {
+        settings[key] = el.value;
+
+        if (onChange) onChange();
+
+        log(`Настройка ${id}: ${settings[key]}`, "info");
+      });
+    }
+
     const fmtDeg = (value) => `${Math.round(value)}°`;
     const fmtMs = (value) => `${Math.round(value)} ms`;
     const fmtNum1 = (value) => value.toFixed(1);
@@ -847,6 +1106,8 @@
     bindRange("tiltThreshold", "tiltThreshold", fmtDeg);
     bindRange("tiltResetThreshold", "tiltResetThreshold", fmtDeg);
     bindRange("tiltCooldownMs", "tiltCooldownMs", fmtMs);
+    bindRange("tiltDebounceMs", "tiltDebounceMs", fmtMs);
+    bindRange("actionFilter", "actionFilter", fmtNum2);
     bindRange("shakeAccelThreshold", "shakeAccelThreshold", fmtNum1);
     bindRange("shakeGravityDeviationThreshold", "shakeGravityDeviationThreshold", fmtNum1);
     bindRange("shakeCooldownMs", "shakeCooldownMs", fmtMs);
@@ -857,15 +1118,24 @@
 
     bindCheckbox("invertTiltAction", "invertTiltAction");
     bindCheckbox("relativeVisual", "relativeVisual");
+    bindCheckbox("ignoreAlpha", "ignoreAlpha");
+    bindCheckbox("stabilizeVertical", "stabilizeVertical");
     bindCheckbox("invertAlpha", "invertAlpha");
     bindCheckbox("invertBeta", "invertBeta");
     bindCheckbox("invertGamma", "invertGamma");
 
-    const tiltAxisEl = $("tiltAxis");
-    tiltAxisEl.value = settings.tiltAxis;
-    tiltAxisEl.addEventListener("change", () => {
-      settings.tiltAxis = tiltAxisEl.value;
-      log(`Ось наклона установлена: ${settings.tiltAxis}`, "info");
+    bindSelect("tiltAxis", "tiltAxis", () => {
+      resetTiltState();
+    });
+
+    bindSelect("tiltSource", "tiltSource", () => {
+      resetTiltState();
+    });
+
+    bindSelect("orientationSource", "orientationSource", () => {
+      if (state.sensorsEnabled) {
+        attachOrientationListener();
+      }
     });
 
     $("enableBtn").addEventListener("click", enableSensors);
@@ -891,6 +1161,7 @@
     window.addEventListener("orientationchange", () => {
       const axis = getActiveAxis();
       state.activeAxis = axis;
+      resetTiltState();
       log(`Ориентация экрана изменилась: ${getScreenAngle()}°, активная ось: ${axis}`, "info");
     });
 
@@ -1084,6 +1355,21 @@
         gamma = normalizeAngle(gamma - state.base.gamma);
       }
 
+      if (settings.ignoreAlpha) {
+        alpha = 0;
+      }
+
+      if (settings.stabilizeVertical) {
+        const betaAbs = Math.abs(normalizeAngle(beta));
+        const nearVertical = Math.max(0, Math.min(1, (betaAbs - 55) / 35));
+
+        gamma *= (1 - 0.55 * nearVertical);
+
+        if (!settings.ignoreAlpha) {
+          alpha *= (1 - 0.75 * nearVertical);
+        }
+      }
+
       if (settings.invertAlpha) alpha = -alpha;
       if (settings.invertBeta) beta = -beta;
       if (settings.invertGamma) gamma = -gamma;
@@ -1166,6 +1452,7 @@
       $("valTilt").textContent = `${state.currentTilt.toFixed(1)}°`;
       $("valAcc").textContent = state.display.accMag.toFixed(2);
       $("valAxis").textContent = state.activeAxis;
+      $("valSource").textContent = state.lastTiltSource || "-";
       $("valArmed").textContent = state.tiltArmed ? "armed" : "blocked";
     }
 
