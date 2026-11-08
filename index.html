@@ -279,9 +279,8 @@
   <main>
     <h1>Debug DeviceOrientation / DeviceMotion</h1>
     <p class="subtitle">
-      Нажми «Включить сенсоры» и разреши доступ, если браузер спросит.
-      Если возле вертикали появляются ложные срабатывания, используй фильтр, debounce,
-      режим наклона «accelerometer» или «auto».
+      Возле вертикали `alpha` и `gamma` могут сходить с ума из-за сингулярности Euler-углов.
+      В этой версии 3D и наклон по умолчанию используют акселерометр, чтобы не зависеть от `alpha`/`gamma`.
     </p>
 
     <div class="toolbar">
@@ -300,9 +299,9 @@
     </div>
 
     <div class="values">
-      <div class="value"><span>alpha</span><b id="valAlpha">0.0°</b></div>
-      <div class="value"><span>beta</span><b id="valBeta">0.0°</b></div>
-      <div class="value"><span>gamma</span><b id="valGamma">0.0°</b></div>
+      <div class="value"><span>alpha raw</span><b id="valAlpha">0.0°</b></div>
+      <div class="value"><span>beta raw</span><b id="valBeta">0.0°</b></div>
+      <div class="value"><span>gamma raw</span><b id="valGamma">0.0°</b></div>
       <div class="value"><span>tilt</span><b id="valTilt">0.0°</b></div>
       <div class="value"><span>accel / deviation</span><b id="valAcc">0.00</b></div>
       <div class="value"><span>active axis</span><b id="valAxis">gamma</b></div>
@@ -311,7 +310,7 @@
     </div>
 
     <section class="panel">
-      <h2>Настройки констант</h2>
+      <h2>Настройки</h2>
 
       <div class="settings">
         <div class="setting">
@@ -422,9 +421,9 @@
         <div class="setting">
           <label for="tiltSource">Источник наклона</label>
           <select id="tiltSource">
+            <option value="accelerometer">accelerometer</option>
             <option value="auto">auto</option>
             <option value="orientation">orientation</option>
-            <option value="accelerometer">accelerometer</option>
           </select>
         </div>
 
@@ -439,8 +438,8 @@
 
         <div class="checkbox-grid">
           <label class="checkbox">
-            <input type="checkbox" id="invertTiltAction" />
-            Инвертировать направление наклона
+            <input type="checkbox" id="accelVisual" checked />
+            Использовать акселерометр для 3D
           </label>
 
           <label class="checkbox">
@@ -449,28 +448,48 @@
           </label>
 
           <label class="checkbox">
+            <input type="checkbox" id="invertTiltAction" />
+            Инвертировать направление наклона
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="accelInvertX" />
+            Инверсия акселерометра X
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="accelInvertY" />
+            Инверсия акселерометра Y
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="accelInvertZ" />
+            Инверсия акселерометра Z
+          </label>
+
+          <label class="checkbox">
             <input type="checkbox" id="ignoreAlpha" checked />
-            Игнорировать alpha в 3D
+            Игнорировать alpha в старом 3D-режиме
           </label>
 
           <label class="checkbox">
             <input type="checkbox" id="stabilizeVertical" checked />
-            Стабилизировать 3D возле вертикали
+            Стабилизировать старый 3D-режим возле вертикали
           </label>
 
           <label class="checkbox">
             <input type="checkbox" id="invertAlpha" />
-            Инверсия alpha для 3D
+            Инверсия alpha для старого 3D
           </label>
 
           <label class="checkbox">
             <input type="checkbox" id="invertBeta" />
-            Инверсия beta для 3D
+            Инверсия beta для старого 3D
           </label>
 
           <label class="checkbox">
             <input type="checkbox" id="invertGamma" />
-            Инверсия gamma для 3D
+            Инверсия gamma для старого 3D
           </label>
         </div>
       </div>
@@ -482,8 +501,8 @@
     </section>
 
     <p class="footer-note">
-      Если возле вертикали всё равно есть дёргание: увеличь «Фильтр наклона» и «Подтверждение наклона»,
-      либо переведи «Источник наклона» в `accelerometer`. Также можно попробовать `deviceorientationabsolute`.
+      Сырые `alpha` и `gamma` могут продолжать прыгать в верхних значениях — это свойство
+      `deviceorientation` около `beta = 90°`. Для действий и 3D лучше использовать акселерометр.
     </p>
   </main>
 
@@ -512,8 +531,13 @@
       viewPitch: -25,
 
       tiltAxis: "auto",
-      tiltSource: "auto",
+      tiltSource: "accelerometer",
       orientationSource: "auto",
+
+      accelVisual: true,
+      accelInvertX: false,
+      accelInvertY: false,
+      accelInvertZ: false,
 
       invertTiltAction: false,
       relativeVisual: true,
@@ -578,7 +602,9 @@
       accelBase: 0,
       accelBaseSet: false,
       accelTiltRaw: 0,
-      orientationTiltRaw: 0
+      orientationTiltRaw: 0,
+
+      baseAccelMatrix: null
     };
 
     function setStatus(text) {
@@ -631,6 +657,10 @@
         Number.isFinite(obj.x) &&
         Number.isFinite(obj.y) &&
         Number.isFinite(obj.z);
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
     }
 
     function getScreenAngle() {
@@ -780,6 +810,7 @@
       state.orientationTiltRaw = orientationTilt;
 
       const useAccelerometer = shouldUseAccelerometer();
+
       const allowOrientation =
         settings.tiltSource === "orientation" ||
         (settings.tiltSource === "auto" && (!useAccelerometer || !state.accel.has));
@@ -787,6 +818,14 @@
       if (allowOrientation) {
         processTilt(orientationTilt, "orientation");
       }
+    }
+
+    function getAccelVector() {
+      return {
+        x: state.accel.x * (settings.accelInvertX ? -1 : 1),
+        y: state.accel.y * (settings.accelInvertY ? -1 : 1),
+        z: state.accel.z * (settings.accelInvertZ ? -1 : 1)
+      };
     }
 
     function onMotion(event) {
@@ -838,16 +877,14 @@
           state.accelBaseSet = false;
         }
 
-        const ax = state.accel.x;
-        const ay = state.accel.y;
-        const az = state.accel.z;
+        const vec = getAccelVector();
 
         let accelAngle;
 
         if (state.activeAxis === "beta") {
-          accelAngle = Math.atan2(ay, Math.hypot(ax, az)) * 180 / Math.PI;
+          accelAngle = Math.atan2(vec.y, Math.hypot(vec.x, vec.z)) * 180 / Math.PI;
         } else {
-          accelAngle = Math.atan2(ax, Math.hypot(ay, az)) * 180 / Math.PI;
+          accelAngle = Math.atan2(vec.x, Math.hypot(vec.y, vec.z)) * 180 / Math.PI;
         }
 
         state.accelAngle = accelAngle;
@@ -1036,6 +1073,129 @@
       }, 2500);
     }
 
+    function identityMatrix() {
+      return [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]
+      ];
+    }
+
+    function transposeMatrix(m) {
+      return [
+        [m[0][0], m[1][0], m[2][0]],
+        [m[0][1], m[1][1], m[2][1]],
+        [m[0][2], m[1][2], m[2][2]]
+      ];
+    }
+
+    function normalizeVec(v) {
+      const len = Math.hypot(v.x, v.y, v.z);
+
+      if (len < 0.000001) {
+        return null;
+      }
+
+      return {
+        x: v.x / len,
+        y: v.y / len,
+        z: v.z / len
+      };
+    }
+
+    function dotVec(a, b) {
+      return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    function crossVec(a, b) {
+      return {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+      };
+    }
+
+    function axisAngleMatrix(axis, angle) {
+      const x = axis.x;
+      const y = axis.y;
+      const z = axis.z;
+
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const t = 1 - c;
+
+      return [
+        [
+          t * x * x + c,
+          t * x * y - s * z,
+          t * x * z + s * y
+        ],
+        [
+          t * x * y + s * z,
+          t * y * y + c,
+          t * y * z - s * x
+        ],
+        [
+          t * x * z - s * y,
+          t * y * z + s * x,
+          t * z * z + c
+        ]
+      ];
+    }
+
+    function matrixFromVectors(from, to) {
+      const v = normalizeVec(from);
+      const t = normalizeVec(to);
+
+      if (!v || !t) {
+        return identityMatrix();
+      }
+
+      const d = clamp(dotVec(v, t), -1, 1);
+
+      if (d > 0.99999) {
+        return identityMatrix();
+      }
+
+      if (d < -0.99999) {
+        return axisAngleMatrix({ x: 1, y: 0, z: 0 }, Math.PI);
+      }
+
+      const axis = normalizeVec(crossVec(v, t));
+
+      if (!axis) {
+        return identityMatrix();
+      }
+
+      const angle = Math.acos(d);
+      return axisAngleMatrix(axis, angle);
+    }
+
+    function getCurrentAccelMatrix() {
+      if (!state.accel.has) {
+        return identityMatrix();
+      }
+
+      const vec = getAccelVector();
+      const up = { x: 0, y: 1, z: 0 };
+
+      return matrixFromVectors(vec, up);
+    }
+
+    function getCurrentAccelVisualMatrix() {
+      const current = getCurrentAccelMatrix();
+
+      if (settings.relativeVisual) {
+        if (!state.baseAccelMatrix) {
+          state.baseAccelMatrix = current;
+        }
+
+        return multiplyMatrices(current, transposeMatrix(state.baseAccelMatrix));
+      }
+
+      return current;
+    }
+
     function calibrateCenter() {
       if (!state.gotOrientation && !state.accel.has) {
         log("Нет данных для калибровки.", "warn");
@@ -1052,6 +1212,7 @@
       if (state.accel.has) {
         state.accelBase = state.accelAngle;
         state.accelBaseSet = true;
+        state.baseAccelMatrix = getCurrentAccelMatrix();
       }
 
       resetTiltState();
@@ -1073,11 +1234,12 @@
       update();
     }
 
-    function bindCheckbox(id, key) {
+    function bindCheckbox(id, key, onChange) {
       const input = $(id);
 
       const update = () => {
         settings[key] = input.checked;
+        if (onChange) onChange();
       };
 
       input.addEventListener("change", update);
@@ -1116,8 +1278,23 @@
     bindRange("viewYaw", "viewYaw", fmtDeg);
     bindRange("viewPitch", "viewPitch", fmtDeg);
 
+    function resetAccelRelated() {
+      state.accelBaseSet = false;
+      state.baseAccelMatrix = null;
+      resetTiltState();
+    }
+
+    bindCheckbox("accelVisual", "accelVisual");
+    bindCheckbox("accelInvertX", "accelInvertX", resetAccelRelated);
+    bindCheckbox("accelInvertY", "accelInvertY", resetAccelRelated);
+    bindCheckbox("accelInvertZ", "accelInvertZ", resetAccelRelated);
+
+    bindCheckbox("relativeVisual", "relativeVisual", () => {
+      state.baseAccelMatrix = null;
+      resetTiltState();
+    });
+
     bindCheckbox("invertTiltAction", "invertTiltAction");
-    bindCheckbox("relativeVisual", "relativeVisual");
     bindCheckbox("ignoreAlpha", "ignoreAlpha");
     bindCheckbox("stabilizeVertical", "stabilizeVertical");
     bindCheckbox("invertAlpha", "invertAlpha");
@@ -1345,6 +1522,10 @@
     }
 
     function getOrientationMatrix() {
+      if (settings.accelVisual && state.accel.has) {
+        return getCurrentAccelVisualMatrix();
+      }
+
       let alpha = state.display.alpha;
       let beta = state.display.beta;
       let gamma = state.display.gamma;
