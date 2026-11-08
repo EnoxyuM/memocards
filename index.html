@@ -97,7 +97,7 @@
 
     .row {
       display: grid;
-      grid-template-columns: 58px 1fr 44px;
+      grid-template-columns: 72px 1fr 54px;
       align-items: center;
       gap: 9px;
       font-size: 12px;
@@ -132,15 +132,21 @@
 
   <div id="controls">
     <div class="row">
-      <span>Max X</span>
-      <input id="maxX" type="range" min="1" max="90" step="1" value="5" />
-      <output id="maxXOut">5°</output>
+      <span>Dead zone</span>
+      <input id="deadZone" type="range" min="0" max="20" step="0.5" value="2" />
+      <output id="deadZoneOut">2.0°</output>
     </div>
 
     <div class="row">
-      <span>Max Y</span>
-      <input id="maxY" type="range" min="1" max="90" step="1" value="10" />
-      <output id="maxYOut">10°</output>
+      <span>Max zone</span>
+      <input id="maxZone" type="range" min="5" max="90" step="1" value="20" />
+      <output id="maxZoneOut">20°</output>
+    </div>
+
+    <div class="row">
+      <span>Max speed</span>
+      <input id="maxSpeed" type="range" min="100" max="3000" step="50" value="1000" />
+      <output id="maxSpeedOut">1000</output>
     </div>
   </div>
 
@@ -151,19 +157,15 @@
     const cursorEl = document.getElementById("cursor");
 
     const settings = {
-      maxX: 5,
-      maxY: 10
+      deadZone: 2,
+      maxZone: 20,
+      maxSpeed: 1000
     };
 
     let vw = window.innerWidth;
     let vh = window.innerHeight;
 
     const pos = {
-      x: vw / 2,
-      y: vh / 2
-    };
-
-    const target = {
       x: vw / 2,
       y: vh / 2
     };
@@ -180,8 +182,7 @@
 
     const SENSOR_FILTER = 0.16;
     const CALIBRATION_SAMPLES = 25;
-    const DEAD_ZONE_DEG = 0.25;
-    const CURSOR_SMOOTHING = 0.25;
+    const CURSOR_SMOOTHING = 0.18;
 
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
@@ -357,46 +358,109 @@
       }
     }
 
-    function computeTarget() {
-      if (state.hasAccel && state.baseSet && state.baseMatrix) {
-        const current = normalizeVector(state.accel);
-
-        if (current) {
-          const v = applyMatrix(state.baseMatrix, current);
-
-          let sx = -v.x * state.baseTargetZ;
-          let sy = v.y * state.baseTargetZ;
-
-          sx = clamp(sx, -1, 1);
-          sy = clamp(sy, -1, 1);
-
-          let angleX = Math.asin(sx) * 180 / Math.PI;
-          let angleY = Math.asin(sy) * 180 / Math.PI;
-
-          if (Math.abs(angleX) < DEAD_ZONE_DEG) angleX = 0;
-          if (Math.abs(angleY) < DEAD_ZONE_DEG) angleY = 0;
-
-          const nx = clamp(angleX / settings.maxX, -1, 1);
-          const ny = clamp(angleY / settings.maxY, -1, 1);
-
-          target.x = vw / 2 + nx * (vw / 2);
-          target.y = vh / 2 + ny * (vh / 2);
-          return;
-        }
+    // Возвращает вектор направления (единичный или нулевой) и скорость в px/s.
+    function getMoveVector() {
+      if (!state.hasAccel || !state.baseSet || !state.baseMatrix) {
+        return { vx: 0, vy: 0, magnitude: 0 };
       }
 
-      target.x = vw / 2;
-      target.y = vh / 2;
+      const current = normalizeVector(state.accel);
+
+      if (!current) {
+        return { vx: 0, vy: 0, magnitude: 0 };
+      }
+
+      const v = applyMatrix(state.baseMatrix, current);
+
+      let sx = -v.x * state.baseTargetZ;
+      let sy = v.y * state.baseTargetZ;
+
+      sx = clamp(sx, -1, 1);
+      sy = clamp(sy, -1, 1);
+
+      const angleX = Math.asin(sx) * 180 / Math.PI;
+      const angleY = Math.asin(sy) * 180 / Math.PI;
+
+      const magnitude = Math.hypot(angleX, angleY);
+
+      if (magnitude <= settings.deadZone) {
+        return { vx: 0, vy: 0, magnitude };
+      }
+
+      const deadZone = settings.deadZone;
+      const maxZone = Math.max(deadZone + 0.1, settings.maxZone);
+
+      let t = (magnitude - deadZone) / (maxZone - deadZone);
+      t = clamp(t, 0, 1);
+
+      // Небольшая нелинейность: чем сильнее наклон, тем резче рост скорости.
+      const curve = t * t;
+
+      const speed = curve * settings.maxSpeed;
+
+      // Единичное направление в плоскости.
+      let dirX, dirY;
+      if (magnitude < 0.0001) {
+        dirX = 0;
+        dirY = 0;
+      } else {
+        dirX = angleX / magnitude;
+        dirY = angleY / magnitude;
+      }
+
+      return {
+        vx: dirX * speed,
+        vy: dirY * speed,
+        magnitude
+      };
     }
 
-    function frame() {
-      computeTarget();
+    // Целевые значения скорости, чтобы движение было плавным.
+    const targetVelocity = { x: 0, y: 0 };
+    const velocity = { x: 0, y: 0 };
 
-      pos.x += (target.x - pos.x) * CURSOR_SMOOTHING;
-      pos.y += (target.y - pos.y) * CURSOR_SMOOTHING;
+    let lastTime = performance.now();
 
-      pos.x = clamp(pos.x, 0, vw);
-      pos.y = clamp(pos.y, 0, vh);
+    function frame(now) {
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      const move = getMoveVector();
+
+      targetVelocity.x = move.vx;
+      targetVelocity.y = move.vy;
+
+      velocity.x += (targetVelocity.x - velocity.x) * CURSOR_SMOOTHING;
+      velocity.y += (targetVelocity.y - velocity.y) * CURSOR_SMOOTHING;
+
+      // Если скорость очень маленькая — обнуляем, чтобы не было "дрейфа".
+      if (Math.abs(velocity.x) < 0.5 && Math.abs(targetVelocity.x) === 0) {
+        velocity.x = 0;
+      }
+      if (Math.abs(velocity.y) < 0.5 && Math.abs(targetVelocity.y) === 0) {
+        velocity.y = 0;
+      }
+
+      pos.x += velocity.x * dt;
+      pos.y += velocity.y * dt;
+
+      const r = 15;
+
+      if (pos.x < r) {
+        pos.x = r;
+        if (velocity.x < 0) velocity.x = -velocity.x * 0.2;
+      } else if (pos.x > vw - r) {
+        pos.x = vw - r;
+        if (velocity.x > 0) velocity.x = -velocity.x * 0.2;
+      }
+
+      if (pos.y < r) {
+        pos.y = r;
+        if (velocity.y < 0) velocity.y = -velocity.y * 0.2;
+      } else if (pos.y > vh - r) {
+        pos.y = vh - r;
+        if (velocity.y > 0) velocity.y = -velocity.y * 0.2;
+      }
 
       cursorEl.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`;
 
@@ -411,21 +475,22 @@
     window.addEventListener("resize", resize);
     resize();
 
-    function bindSlider(inputId, outputId, key) {
+    function bindSlider(inputId, outputId, key, format) {
       const input = document.getElementById(inputId);
       const output = document.getElementById(outputId);
 
       const update = () => {
         settings[key] = parseFloat(input.value);
-        output.textContent = `${Math.round(settings[key])}°`;
+        output.textContent = format(settings[key]);
       };
 
       input.addEventListener("input", update);
       update();
     }
 
-    bindSlider("maxX", "maxXOut", "maxX");
-    bindSlider("maxY", "maxYOut", "maxY");
+    bindSlider("deadZone", "deadZoneOut", "deadZone", (v) => `${v.toFixed(1)}°`);
+    bindSlider("maxZone", "maxZoneOut", "maxZone", (v) => `${Math.round(v)}°`);
+    bindSlider("maxSpeed", "maxSpeedOut", "maxSpeed", (v) => `${Math.round(v)}`);
 
     overlay.addEventListener("click", () => {
       let permissionPromise = Promise.resolve("granted");
