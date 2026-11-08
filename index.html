@@ -11,8 +11,8 @@
     html,
     body {
       margin: 0;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
       overflow: hidden;
       background: #050b18;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -133,14 +133,14 @@
   <div id="controls">
     <div class="row">
       <span>Max X</span>
-      <input id="maxX" type="range" min="2" max="90" step="1" value="20" />
-      <output id="maxXOut">20°</output>
+      <input id="maxX" type="range" min="1" max="90" step="1" value="5" />
+      <output id="maxXOut">5°</output>
     </div>
 
     <div class="row">
       <span>Max Y</span>
-      <input id="maxY" type="range" min="2" max="90" step="1" value="20" />
-      <output id="maxYOut">20°</output>
+      <input id="maxY" type="range" min="1" max="90" step="1" value="10" />
+      <output id="maxYOut">10°</output>
     </div>
   </div>
 
@@ -151,8 +151,8 @@
     const cursorEl = document.getElementById("cursor");
 
     const settings = {
-      maxX: 20,
-      maxY: 20
+      maxX: 5,
+      maxY: 10
     };
 
     let vw = window.innerWidth;
@@ -175,12 +175,7 @@
       samples: [],
       accel: { x: 0, y: 0, z: 0 },
       baseMatrix: null,
-      baseTargetZ: 1,
-      pointer: {
-        x: vw / 2,
-        y: vh / 2,
-        has: false
-      }
+      baseTargetZ: 1
     };
 
     const SENSOR_FILTER = 0.16;
@@ -386,15 +381,8 @@
 
           target.x = vw / 2 + nx * (vw / 2);
           target.y = vh / 2 + ny * (vh / 2);
-
           return;
         }
-      }
-
-      if (!state.hasAccel && state.pointer.has) {
-        target.x = state.pointer.x;
-        target.y = state.pointer.y;
-        return;
       }
 
       target.x = vw / 2;
@@ -449,18 +437,6 @@
         permissionPromise = DeviceMotionEvent.requestPermission();
       }
 
-      try {
-        const fullscreenPromise = document.documentElement.requestFullscreen
-          ? document.documentElement.requestFullscreen()
-          : null;
-
-        if (fullscreenPromise && fullscreenPromise.catch) {
-          fullscreenPromise.catch(() => {});
-        }
-      } catch {
-        // Полноэкранный режим не обязателен.
-      }
-
       permissionPromise
         .then((result) => {
           if (result === "granted" || result === undefined) {
@@ -479,19 +455,6 @@
           overlay.textContent = `Ошибка: ${message}`;
         });
     });
-
-    // Если нет датчиков, можно двигать курсор мышью/пальцем.
-    window.addEventListener(
-      "pointermove",
-      (event) => {
-        if (!state.hasAccel) {
-          state.pointer.x = event.clientX;
-          state.pointer.y = event.clientY;
-          state.pointer.has = true;
-        }
-      },
-      { passive: true }
-    );
 
     // Двойной тап по экрану — повторная калибровка центра.
     let lastTap = 0;
