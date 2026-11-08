@@ -2,387 +2,301 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Шарик наклоном</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+  />
+  <title>Курсор наклоном</title>
   <style>
-    :root {
-      color-scheme: dark;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
+    html,
     body {
       margin: 0;
-      min-height: 100vh;
-      min-height: 100dvh;
-      padding: 12px;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #050b18;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #020617;
-      color: #e2e8f0;
-    }
-
-    main {
-      width: min(980px, 100%);
-      margin: 0 auto;
-      display: grid;
-      gap: 12px;
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 1.3rem;
-      line-height: 1.2;
-    }
-
-    .subtitle {
-      margin: 0;
-      color: #94a3b8;
-      font-size: 0.92rem;
-      line-height: 1.35;
-    }
-
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    button {
-      border: 1px solid #334155;
-      background: #0f172a;
-      color: #e2e8f0;
-      border-radius: 12px;
-      padding: 10px 12px;
-      font-size: 0.95rem;
-      cursor: pointer;
       touch-action: manipulation;
     }
 
-    button:active {
-      transform: translateY(1px);
+    body {
+      cursor: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    #status {
-      min-height: 1.4em;
-      color: #cbd5e1;
-      font-size: 0.95rem;
-    }
-
-    .canvas-wrap {
-      width: 100%;
-      height: min(62vh, 560px);
-      border: 1px solid #334155;
-      border-radius: 20px;
-      overflow: hidden;
-      background:
-        radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.16), transparent 34%),
-        radial-gradient(circle at 75% 75%, rgba(34, 197, 94, 0.10), transparent 28%),
-        #071120;
-    }
-
-    canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-      touch-action: none;
-      cursor: crosshair;
-    }
-
-    .values {
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-      gap: 8px;
+      place-items: center;
+      padding: 20px;
+      text-align: center;
+      color: #e2e8f0;
+      background: rgba(2, 6, 23, 0.72);
+      font-size: 19px;
+      line-height: 1.35;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
     }
 
-    .value {
-      padding: 10px;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      background: #0f172a;
-      min-height: 72px;
+    #overlay.hidden {
+      display: none;
     }
 
-    .value span {
-      display: block;
-      color: #94a3b8;
-      font-size: 0.8rem;
-      margin-bottom: 6px;
+    #cursor {
+      position: fixed;
+      left: 0;
+      top: 0;
+      z-index: 40;
+      pointer-events: none;
+      will-change: transform;
     }
 
-    .value b {
-      font-size: 1.05rem;
-      font-variant-numeric: tabular-nums;
-      word-break: break-word;
+    #cursor .ring {
+      position: absolute;
+      left: -15px;
+      top: -15px;
+      width: 30px;
+      height: 30px;
+      border: 2px solid rgba(255, 255, 255, 0.92);
+      border-radius: 50%;
+      box-shadow:
+        0 0 12px rgba(0, 0, 0, 0.45),
+        inset 0 0 8px rgba(255, 255, 255, 0.12);
     }
 
-    section.panel {
-      border: 1px solid #1f2937;
-      background: #0f172a;
-      border-radius: 20px;
-      padding: 12px;
+    #cursor .dot {
+      position: absolute;
+      left: -2.5px;
+      top: -2.5px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
     }
 
-    section.panel h2 {
-      margin: 0 0 10px;
-      font-size: 1.05rem;
-    }
-
-    .settings {
+    #controls {
+      position: fixed;
+      left: 10px;
+      right: 10px;
+      bottom: max(10px, env(safe-area-inset-bottom));
+      z-index: 20;
       display: grid;
-      gap: 12px;
+      gap: 7px;
+      padding: 9px 11px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 16px;
+      background: rgba(2, 6, 23, 0.34);
+      backdrop-filter: blur(12px);
+      color: #e2e8f0;
+      cursor: auto;
     }
 
-    .setting {
+    .row {
       display: grid;
-      gap: 6px;
-      padding: 10px;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      background: #020617;
-    }
-
-    .setting label {
-      display: flex;
+      grid-template-columns: 58px 1fr 44px;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      font-size: 0.92rem;
-      color: #dbeafe;
+      gap: 9px;
+      font-size: 12px;
     }
 
-    .setting output {
+    .row span {
+      color: #cbd5e1;
+    }
+
+    .row output {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
       color: #93c5fd;
       font-weight: 700;
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
     }
 
     input[type="range"] {
       width: 100%;
-      accent-color: #3b82f6;
-    }
-
-    .checkbox-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 8px;
-    }
-
-    .checkbox {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      background: #020617;
-      font-size: 0.9rem;
-      color: #dbeafe;
-    }
-
-    .checkbox input {
-      width: 18px;
-      height: 18px;
-      accent-color: #3b82f6;
-    }
-
-    .footer-note {
-      color: #64748b;
-      font-size: 0.86rem;
-      line-height: 1.4;
+      accent-color: #60a5fa;
     }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Шарик наклоном</h1>
-    <p class="subtitle">
-      Положи телефон на стол и нажми «Центр». После этого в горизонтальном положении шарик должен стоять.
-      Наклон телефона катит шарик. Скорость зависит от угла наклона.
-    </p>
+  <div id="overlay">
+    Нажми, чтобы включить управление наклоном
+  </div>
 
-    <div class="toolbar">
-      <button id="enableBtn" type="button">Включить сенсоры</button>
-      <button id="centerBtn" type="button">Центр</button>
-      <button id="resetBtn" type="button">Сброс шарика</button>
+  <div id="cursor">
+    <div class="ring"></div>
+    <div class="dot"></div>
+  </div>
+
+  <div id="controls">
+    <div class="row">
+      <span>Max X</span>
+      <input id="maxX" type="range" min="2" max="90" step="1" value="20" />
+      <output id="maxXOut">20°</output>
     </div>
 
-    <div id="status">
-      Сенсоры выключены. На телефоне нажми «Включить сенсоры». На компьютере можно тянуть мышью или пальцем по полю.
+    <div class="row">
+      <span>Max Y</span>
+      <input id="maxY" type="range" min="2" max="90" step="1" value="20" />
+      <output id="maxYOut">20°</output>
     </div>
-
-    <div class="canvas-wrap">
-      <canvas id="canvas"></canvas>
-    </div>
-
-    <div class="values">
-      <div class="value"><span>tilt X</span><b id="valTiltX">0.00</b></div>
-      <div class="value"><span>tilt Y</span><b id="valTiltY">0.00</b></div>
-      <div class="value"><span>speed</span><b id="valSpeed">0 px/s</b></div>
-      <div class="value"><span>source</span><b id="valSource">none</b></div>
-    </div>
-
-    <section class="panel">
-      <h2>Настройки физики</h2>
-
-      <div class="settings">
-        <div class="setting">
-          <label for="sensitivity">
-            Чувствительность
-            <output id="sensitivityValue">220</output>
-          </label>
-          <input id="sensitivity" type="range" min="10" max="800" step="5" value="220" />
-        </div>
-
-        <div class="setting">
-          <label for="friction">
-            Трение
-            <output id="frictionValue">2.2</output>
-          </label>
-          <input id="friction" type="range" min="0" max="10" step="0.1" value="2.2" />
-        </div>
-
-        <div class="setting">
-          <label for="restitution">
-            Отскок от стен
-            <output id="restitutionValue">0.45</output>
-          </label>
-          <input id="restitution" type="range" min="0" max="0.95" step="0.05" value="0.45" />
-        </div>
-
-        <div class="setting">
-          <label for="deadZone">
-            Мёртвая зона, м/с²
-            <output id="deadZoneValue">0.20</output>
-          </label>
-          <input id="deadZone" type="range" min="0" max="2" step="0.05" value="0.2" />
-        </div>
-
-        <div class="setting">
-          <label for="sensorFilter">
-            Фильтр датчика, сильнее = стабильнее
-            <output id="sensorFilterValue">0.85</output>
-          </label>
-          <input id="sensorFilter" type="range" min="0" max="0.98" step="0.01" value="0.85" />
-        </div>
-
-        <div class="setting">
-          <label for="radius">
-            Радиус шарика
-            <output id="radiusValue">18 px</output>
-          </label>
-          <input id="radius" type="range" min="8" max="50" step="1" value="18" />
-        </div>
-
-        <div class="setting">
-          <label for="maxSpeed">
-            Максимальная скорость
-            <output id="maxSpeedValue">1600 px/s</output>
-          </label>
-          <input id="maxSpeed" type="range" min="200" max="4000" step="50" value="1600" />
-        </div>
-
-        <div class="checkbox-grid">
-          <label class="checkbox">
-            <input type="checkbox" id="invertX" />
-            Инверсия оси X
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="invertY" />
-            Инверсия оси Y
-          </label>
-        </div>
-      </div>
-    </section>
-
-    <p class="footer-note">
-      Если шарик катится не в ту сторону, включи инверсию оси.
-      Если на ровном столе шарик медленно уезжает, нажми «Центр» или увеличи мёртвую зону / фильтр датчика.
-    </p>
-  </main>
+  </div>
 
   <script>
     "use strict";
 
-    const $ = (id) => document.getElementById(id);
-
-    const canvas = $("canvas");
-    const ctx = canvas.getContext("2d");
+    const overlay = document.getElementById("overlay");
+    const cursorEl = document.getElementById("cursor");
 
     const settings = {
-      sensitivity: 220,
-      friction: 2.2,
-      restitution: 0.45,
-      deadZone: 0.2,
-      sensorFilter: 0.85,
-      radius: 18,
-      maxSpeed: 1600,
-      invertX: false,
-      invertY: false
+      maxX: 20,
+      maxY: 20
+    };
+
+    let vw = window.innerWidth;
+    let vh = window.innerHeight;
+
+    const pos = {
+      x: vw / 2,
+      y: vh / 2
+    };
+
+    const target = {
+      x: vw / 2,
+      y: vh / 2
     };
 
     const state = {
-      sensorsEnabled: false,
-      gotMotion: false,
-
-      accel: {
-        x: 0,
-        y: 0,
-        z: 0,
-        has: false
-      },
-
-      base: {
-        x: 0,
-        y: 0,
-        set: false
-      },
-
-      currentAccel: {
-        x: 0,
-        y: 0
-      },
-
-      source: "none",
-
+      motionEnabled: false,
+      hasAccel: false,
+      baseSet: false,
+      samples: [],
+      accel: { x: 0, y: 0, z: 0 },
+      baseMatrix: null,
+      baseTargetZ: 1,
       pointer: {
-        active: false,
-        x: 0,
-        y: 0
+        x: vw / 2,
+        y: vh / 2,
+        has: false
       }
     };
 
-    const ball = {
-      x: 0,
-      y: 0,
-      vx: 0,
-      vy: 0,
-      texX: 0,
-      texY: 0
-    };
-
-    let cssW = 0;
-    let cssH = 0;
-    let initialized = false;
-
-    function setStatus(text) {
-      $("status").textContent = text;
-    }
+    const SENSOR_FILTER = 0.16;
+    const CALIBRATION_SAMPLES = 25;
+    const DEAD_ZONE_DEG = 0.25;
+    const CURSOR_SMOOTHING = 0.25;
 
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
     }
 
-    function mod(value, modulo) {
-      return ((value % modulo) + modulo) % modulo;
+    function normalizeVector(v) {
+      const len = Math.hypot(v.x, v.y, v.z);
+
+      if (len < 0.000001) {
+        return null;
+      }
+
+      return {
+        x: v.x / len,
+        y: v.y / len,
+        z: v.z / len
+      };
+    }
+
+    function dotVec(a, b) {
+      return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    function crossVec(a, b) {
+      return {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x
+      };
+    }
+
+    function identityMatrix() {
+      return [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1]
+      ];
+    }
+
+    function axisAngleMatrix(axis, angle) {
+      const x = axis.x;
+      const y = axis.y;
+      const z = axis.z;
+
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+      const t = 1 - c;
+
+      return [
+        [
+          t * x * x + c,
+          t * x * y - s * z,
+          t * x * z + s * y
+        ],
+        [
+          t * x * y + s * z,
+          t * y * y + c,
+          t * y * z - s * x
+        ],
+        [
+          t * x * z - s * y,
+          t * y * z + s * x,
+          t * z * z + c
+        ]
+      ];
+    }
+
+    function matrixFromVectors(from, to) {
+      const f = normalizeVector(from);
+      const t = normalizeVector(to);
+
+      if (!f || !t) {
+        return identityMatrix();
+      }
+
+      const d = clamp(dotVec(f, t), -1, 1);
+
+      if (d > 0.99999) {
+        return identityMatrix();
+      }
+
+      if (d < -0.99999) {
+        return axisAngleMatrix({ x: 1, y: 0, z: 0 }, Math.PI);
+      }
+
+      const axis = normalizeVector(crossVec(f, t));
+
+      if (!axis) {
+        return identityMatrix();
+      }
+
+      return axisAngleMatrix(axis, Math.acos(d));
+    }
+
+    function applyMatrix(m, v) {
+      return {
+        x: m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
+        y: m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
+        z: m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z
+      };
+    }
+
+    function makeBaseMatrix(baseNormalized) {
+      const targetZ = baseNormalized.z >= 0 ? 1 : -1;
+      state.baseTargetZ = targetZ;
+
+      return matrixFromVectors(
+        baseNormalized,
+        { x: 0, y: 0, z: targetZ }
+      );
     }
 
     function validXYZ(obj) {
@@ -392,420 +306,215 @@
         Number.isFinite(obj.z);
     }
 
-    function resizeCanvas() {
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-
-      cssW = rect.width;
-      cssH = rect.height;
-
-      canvas.width = Math.max(1, Math.floor(cssW * dpr));
-      canvas.height = Math.max(1, Math.floor(cssH * dpr));
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      if (!initialized) {
-        resetBall();
-        initialized = true;
-      } else {
-        clampBall();
-      }
-    }
-
-    function resetBall() {
-      ball.x = cssW / 2;
-      ball.y = cssH / 2;
-      ball.vx = 0;
-      ball.vy = 0;
-      ball.texX = 0;
-      ball.texY = 0;
-    }
-
-    function clampBall() {
-      const r = settings.radius;
-
-      if (cssW > r * 2) {
-        ball.x = clamp(ball.x, r, cssW - r);
-      } else {
-        ball.x = cssW / 2;
-      }
-
-      if (cssH > r * 2) {
-        ball.y = clamp(ball.y, r, cssH - r);
-      } else {
-        ball.y = cssH / 2;
-      }
-    }
-
-    function applyDeadZone(x, y) {
-      const magnitude = Math.hypot(x, y);
-
-      if (magnitude < settings.deadZone) {
-        return { x: 0, y: 0 };
-      }
-
-      const scale = (magnitude - settings.deadZone) / magnitude;
-
-      return {
-        x: x * scale,
-        y: y * scale
-      };
-    }
-
-    function getTilt() {
-      if (state.sensorsEnabled && state.accel.has && state.base.set) {
-        const gx = state.accel.x - state.base.x;
-        const gy = state.accel.y - state.base.y;
-
-        // Подбор знаков: обычно правый наклон и верх/низ зависят от конкретной реализации.
-        // Если направление неверное, используются галочки инверсии.
-        let ax = -gx;
-        let ay = gy;
-
-        if (settings.invertX) ax = -ax;
-        if (settings.invertY) ay = -ay;
-
-        const deadZoned = applyDeadZone(ax, ay);
-
-        return {
-          x: deadZoned.x,
-          y: deadZoned.y,
-          source: "sensor"
-        };
-      }
-
-      if (state.pointer.active) {
-        const deadZoned = applyDeadZone(state.pointer.x, state.pointer.y);
-
-        return {
-          x: deadZoned.x,
-          y: deadZoned.y,
-          source: "pointer"
-        };
-      }
-
-      return {
-        x: 0,
-        y: 0,
-        source: "none"
-      };
-    }
-
     function onMotion(event) {
-      if (!state.sensorsEnabled) return;
-
-      state.gotMotion = true;
-
-      if (!validXYZ(event.accelerationIncludingGravity)) {
-        return;
-      }
+      if (!state.motionEnabled) return;
 
       const g = event.accelerationIncludingGravity;
-      const factor = Math.max(0.0001, 1 - settings.sensorFilter);
 
-      if (!state.accel.has) {
+      if (!validXYZ(g)) return;
+
+      if (!state.hasAccel) {
         state.accel.x = g.x;
         state.accel.y = g.y;
         state.accel.z = g.z;
-        state.accel.has = true;
+        state.hasAccel = true;
       } else {
-        state.accel.x += (g.x - state.accel.x) * factor;
-        state.accel.y += (g.y - state.accel.y) * factor;
-        state.accel.z += (g.z - state.accel.z) * factor;
+        state.accel.x += (g.x - state.accel.x) * SENSOR_FILTER;
+        state.accel.y += (g.y - state.accel.y) * SENSOR_FILTER;
+        state.accel.z += (g.z - state.accel.z) * SENSOR_FILTER;
       }
 
-      if (!state.base.set) {
-        state.base.x = state.accel.x;
-        state.base.y = state.accel.y;
-        state.base.set = true;
-      }
-    }
+      if (!state.baseSet) {
+        state.samples.push({
+          x: state.accel.x,
+          y: state.accel.y,
+          z: state.accel.z
+        });
 
-    async function enableSensors() {
-      if (!("DeviceMotionEvent" in window)) {
-        setStatus("DeviceMotion не поддерживается. На компьютере можно тянуть мышью или пальцем по полю.");
-        $("enableBtn").disabled = true;
-        return;
-      }
+        if (state.samples.length >= CALIBRATION_SAMPLES) {
+          let x = 0;
+          let y = 0;
+          let z = 0;
 
-      setStatus("Запрашиваем доступ к датчикам движения...");
-
-      try {
-        if (typeof DeviceMotionEvent.requestPermission === "function") {
-          const result = await DeviceMotionEvent.requestPermission();
-
-          if (result !== "granted") {
-            setStatus("Доступ к движению не разрешён.");
-            return;
+          for (const sample of state.samples) {
+            x += sample.x;
+            y += sample.y;
+            z += sample.z;
           }
+
+          const n = state.samples.length;
+
+          const avg = {
+            x: x / n,
+            y: y / n,
+            z: z / n
+          };
+
+          const normalized = normalizeVector(avg);
+
+          if (normalized) {
+            state.baseMatrix = makeBaseMatrix(normalized);
+            state.baseSet = true;
+          }
+
+          state.samples = [];
         }
-      } catch (error) {
-        const message = error && error.message ? error.message : String(error);
-        setStatus(`Ошибка доступа: ${message}`);
+      }
+    }
+
+    function computeTarget() {
+      if (state.hasAccel && state.baseSet && state.baseMatrix) {
+        const current = normalizeVector(state.accel);
+
+        if (current) {
+          const v = applyMatrix(state.baseMatrix, current);
+
+          let sx = -v.x * state.baseTargetZ;
+          let sy = v.y * state.baseTargetZ;
+
+          sx = clamp(sx, -1, 1);
+          sy = clamp(sy, -1, 1);
+
+          let angleX = Math.asin(sx) * 180 / Math.PI;
+          let angleY = Math.asin(sy) * 180 / Math.PI;
+
+          if (Math.abs(angleX) < DEAD_ZONE_DEG) angleX = 0;
+          if (Math.abs(angleY) < DEAD_ZONE_DEG) angleY = 0;
+
+          const nx = clamp(angleX / settings.maxX, -1, 1);
+          const ny = clamp(angleY / settings.maxY, -1, 1);
+
+          target.x = vw / 2 + nx * (vw / 2);
+          target.y = vh / 2 + ny * (vh / 2);
+
+          return;
+        }
+      }
+
+      if (!state.hasAccel && state.pointer.has) {
+        target.x = state.pointer.x;
+        target.y = state.pointer.y;
         return;
       }
 
-      window.addEventListener("devicemotion", onMotion);
-
-      state.sensorsEnabled = true;
-      $("enableBtn").disabled = true;
-
-      setStatus("Сенсоры включены. Положи телефон на стол и нажми «Центр», если нужно.");
-
-      setTimeout(() => {
-        if (!state.gotMotion) {
-          setStatus("События DeviceMotion не приходят. Проверь доступ датчиков и HTTPS.");
-        }
-      }, 2500);
+      target.x = vw / 2;
+      target.y = vh / 2;
     }
 
-    function calibrateCenter() {
-      if (!state.accel.has) {
-        setStatus("Нет данных акселерометра для калибровки.");
-        return;
-      }
+    function frame() {
+      computeTarget();
 
-      state.base.x = state.accel.x;
-      state.base.y = state.accel.y;
-      state.base.set = true;
+      pos.x += (target.x - pos.x) * CURSOR_SMOOTHING;
+      pos.y += (target.y - pos.y) * CURSOR_SMOOTHING;
 
-      setStatus("Текущее положение телефона принято за центр.");
+      pos.x = clamp(pos.x, 0, vw);
+      pos.y = clamp(pos.y, 0, vh);
+
+      cursorEl.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`;
+
+      requestAnimationFrame(frame);
     }
 
-    function bindRange(id, key, formatter, onChange) {
-      const input = $(id);
-      const output = $(`${id}Value`);
+    function resize() {
+      vw = window.innerWidth;
+      vh = window.innerHeight;
+    }
+
+    window.addEventListener("resize", resize);
+    resize();
+
+    function bindSlider(inputId, outputId, key) {
+      const input = document.getElementById(inputId);
+      const output = document.getElementById(outputId);
 
       const update = () => {
         settings[key] = parseFloat(input.value);
-        output.textContent = formatter(settings[key]);
-
-        if (onChange) onChange();
+        output.textContent = `${Math.round(settings[key])}°`;
       };
 
       input.addEventListener("input", update);
       update();
     }
 
-    function bindCheckbox(id, key) {
-      const input = $(id);
+    bindSlider("maxX", "maxXOut", "maxX");
+    bindSlider("maxY", "maxYOut", "maxY");
 
-      const update = () => {
-        settings[key] = input.checked;
-      };
+    overlay.addEventListener("click", () => {
+      let permissionPromise = Promise.resolve("granted");
 
-      input.addEventListener("change", update);
-      update();
-    }
-
-    bindRange("sensitivity", "sensitivity", (v) => String(Math.round(v)));
-    bindRange("friction", "friction", (v) => v.toFixed(1));
-    bindRange("restitution", "restitution", (v) => v.toFixed(2));
-    bindRange("deadZone", "deadZone", (v) => v.toFixed(2));
-    bindRange("sensorFilter", "sensorFilter", (v) => v.toFixed(2));
-    bindRange("radius", "radius", (v) => `${Math.round(v)} px`, clampBall);
-    bindRange("maxSpeed", "maxSpeed", (v) => `${Math.round(v)} px/s`);
-
-    bindCheckbox("invertX", "invertX");
-    bindCheckbox("invertY", "invertY");
-
-    $("enableBtn").addEventListener("click", enableSensors);
-    $("centerBtn").addEventListener("click", calibrateCenter);
-    $("resetBtn").addEventListener("click", resetBall);
-
-    function updatePointer(event) {
-      const rect = canvas.getBoundingClientRect();
-
-      const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
-
-      state.pointer.x = nx * 9.81;
-      state.pointer.y = ny * 9.81;
-    }
-
-    canvas.addEventListener("pointerdown", (event) => {
-      state.pointer.active = true;
-      canvas.setPointerCapture(event.pointerId);
-      updatePointer(event);
-    });
-
-    canvas.addEventListener("pointermove", (event) => {
-      if (state.pointer.active) {
-        updatePointer(event);
-      }
-    });
-
-    canvas.addEventListener("pointerup", () => {
-      state.pointer.active = false;
-    });
-
-    canvas.addEventListener("pointercancel", () => {
-      state.pointer.active = false;
-    });
-
-    function physics(dt) {
-      const tilt = getTilt();
-
-      state.currentAccel.x = tilt.x;
-      state.currentAccel.y = tilt.y;
-      state.source = tilt.source;
-
-      const ax = tilt.x * settings.sensitivity;
-      const ay = tilt.y * settings.sensitivity;
-
-      ball.vx += ax * dt;
-      ball.vy += ay * dt;
-
-      const damping = Math.exp(-settings.friction * dt);
-      ball.vx *= damping;
-      ball.vy *= damping;
-
-      let speed = Math.hypot(ball.vx, ball.vy);
-
-      if (speed > settings.maxSpeed) {
-        const scale = settings.maxSpeed / speed;
-        ball.vx *= scale;
-        ball.vy *= scale;
-        speed = settings.maxSpeed;
+      if (
+        "DeviceMotionEvent" in window &&
+        typeof DeviceMotionEvent.requestPermission === "function"
+      ) {
+        permissionPromise = DeviceMotionEvent.requestPermission();
       }
 
-      ball.x += ball.vx * dt;
-      ball.y += ball.vy * dt;
+      try {
+        const fullscreenPromise = document.documentElement.requestFullscreen
+          ? document.documentElement.requestFullscreen()
+          : null;
 
-      const r = settings.radius;
-
-      if (ball.x < r) {
-        ball.x = r;
-        ball.vx = Math.abs(ball.vx) * settings.restitution;
-      }
-
-      if (ball.x > cssW - r) {
-        ball.x = cssW - r;
-        ball.vx = -Math.abs(ball.vx) * settings.restitution;
-      }
-
-      if (ball.y < r) {
-        ball.y = r;
-        ball.vy = Math.abs(ball.vy) * settings.restitution;
-      }
-
-      if (ball.y > cssH - r) {
-        ball.y = cssH - r;
-        ball.vy = -Math.abs(ball.vy) * settings.restitution;
-      }
-
-      // Смещение текстуры для иллюзии качения.
-      ball.texX -= ball.vx * dt;
-      ball.texY -= ball.vy * dt;
-
-      return speed;
-    }
-
-    function drawBall() {
-      const x = ball.x;
-      const y = ball.y;
-      const r = settings.radius;
-
-      ctx.save();
-
-      // Тень/нижний слой.
-      ctx.beginPath();
-      ctx.ellipse(x, y + r * 0.85, r * 0.9, r * 0.22, 0, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-      ctx.fill();
-
-      // Обрезка по кругу.
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.clip();
-
-      // Основной градиент шарика.
-      const gradient = ctx.createRadialGradient(
-        x - r * 0.35,
-        y - r * 0.35,
-        r * 0.1,
-        x,
-        y,
-        r
-      );
-
-      gradient.addColorStop(0, "#fb923c");
-      gradient.addColorStop(0.55, "#f97316");
-      gradient.addColorStop(1, "#7c2d12");
-
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x - r, y - r, r * 2, r * 2);
-
-      // Катящаяся текстура.
-      const spacing = Math.max(7, r * 0.8);
-      const ox = mod(ball.texX, spacing);
-      const oy = mod(ball.texY, spacing);
-
-      ctx.fillStyle = "rgba(255, 255, 255, 0.20)";
-
-      for (let px = -spacing; px <= r * 2 + spacing; px += spacing) {
-        for (let py = -spacing; py <= r * 2 + spacing; py += spacing) {
-          const dx = px + ox - r;
-          const dy = py + oy - r;
-
-          if (Math.hypot(dx, dy) <= r * 0.92) {
-            ctx.beginPath();
-            ctx.arc(x + dx, y + dy, r * 0.12, 0, Math.PI * 2);
-            ctx.fill();
-          }
+        if (fullscreenPromise && fullscreenPromise.catch) {
+          fullscreenPromise.catch(() => {});
         }
+      } catch {
+        // Полноэкранный режим не обязателен.
       }
 
-      ctx.restore();
+      permissionPromise
+        .then((result) => {
+          if (result === "granted" || result === undefined) {
+            if ("DeviceMotionEvent" in window) {
+              window.addEventListener("devicemotion", onMotion);
+            }
 
-      // Контур.
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
-      ctx.lineWidth = 2;
-      ctx.stroke();
+            state.motionEnabled = true;
+            overlay.classList.add("hidden");
+          } else {
+            overlay.textContent = "Доступ к датчикам не разрешён.";
+          }
+        })
+        .catch((error) => {
+          const message = error && error.message ? error.message : String(error);
+          overlay.textContent = `Ошибка: ${message}`;
+        });
+    });
 
-      // Блик.
-      ctx.beginPath();
-      ctx.arc(x - r * 0.32, y - r * 0.34, r * 0.18, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
-      ctx.fill();
-    }
+    // Если нет датчиков, можно двигать курсор мышью/пальцем.
+    window.addEventListener(
+      "pointermove",
+      (event) => {
+        if (!state.hasAccel) {
+          state.pointer.x = event.clientX;
+          state.pointer.y = event.clientY;
+          state.pointer.has = true;
+        }
+      },
+      { passive: true }
+    );
 
-    function draw() {
-      ctx.clearRect(0, 0, cssW, cssH);
+    // Двойной тап по экрану — повторная калибровка центра.
+    let lastTap = 0;
 
-      drawBall();
-    }
+    window.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!state.motionEnabled) return;
+        if (event.target.closest("#controls")) return;
+        if (event.target.closest("#overlay")) return;
 
-    function updateValues(speed) {
-      $("valTiltX").textContent = state.currentAccel.x.toFixed(2);
-      $("valTiltY").textContent = state.currentAccel.y.toFixed(2);
-      $("valSpeed").textContent = `${Math.round(speed)} px/s`;
-      $("valSource").textContent = state.source;
-    }
+        const now = Date.now();
 
-    let lastTime = performance.now();
+        if (now - lastTap < 300) {
+          state.baseSet = false;
+          state.samples = [];
+        }
 
-    function frame(now) {
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
-      lastTime = now;
+        lastTap = now;
+      },
+      { passive: true }
+    );
 
-      let speed = 0;
-
-      if (cssW > 0 && cssH > 0) {
-        speed = physics(dt);
-        draw();
-      }
-
-      updateValues(speed);
-
-      requestAnimationFrame(frame);
-    }
-
-    window.addEventListener("resize", resizeCanvas);
-
-    resizeCanvas();
     requestAnimationFrame(frame);
   </script>
 </body>
