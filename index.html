@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Флеш-карточки с гироскопом</title>
+  <title>Debug DeviceOrientation / DeviceMotion</title>
   <style>
     :root {
-      color-scheme: light dark;
+      color-scheme: dark;
     }
 
     * {
@@ -17,50 +17,45 @@
       margin: 0;
       min-height: 100vh;
       min-height: 100dvh;
-      display: grid;
-      place-items: center;
-      padding: 16px;
+      padding: 12px;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #f3f4f6;
-      color: #111827;
+      background: #020617;
+      color: #e2e8f0;
     }
 
-    .wrapper {
-      width: min(640px, 100%);
+    main {
+      width: min(980px, 100%);
+      margin: 0 auto;
       display: grid;
-      gap: 12px;
-    }
-
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
       gap: 12px;
     }
 
     h1 {
       margin: 0;
-      font-size: 1.35rem;
+      font-size: 1.3rem;
+      line-height: 1.2;
     }
 
-    .counter {
-      opacity: 0.7;
-      font-variant-numeric: tabular-nums;
+    .subtitle {
+      margin: 0;
+      color: #94a3b8;
+      font-size: 0.92rem;
+      line-height: 1.35;
     }
 
     .toolbar {
       display: flex;
-      gap: 8px;
       flex-wrap: wrap;
+      gap: 8px;
     }
 
     button {
-      border: 1px solid #d1d5db;
-      background: #fff;
-      color: #111827;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
       border-radius: 12px;
-      padding: 10px 14px;
-      font-size: 1rem;
+      padding: 10px 12px;
+      font-size: 0.95rem;
       cursor: pointer;
       touch-action: manipulation;
     }
@@ -74,366 +69,1123 @@
       cursor: not-allowed;
     }
 
-    .status {
+    #status {
       min-height: 1.4em;
+      color: #cbd5e1;
       font-size: 0.95rem;
-      opacity: 0.85;
     }
 
-    .card {
-      perspective: 1200px;
-      height: min(62vh, 430px);
-    }
-
-    .card-inner {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      transform-style: preserve-3d;
-      transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
-    }
-
-    .card-inner.flipped {
-      transform: rotateY(180deg);
-    }
-
-    .face {
-      position: absolute;
-      inset: 0;
-      backface-visibility: hidden;
-      -webkit-backface-visibility: hidden;
+    .last-action {
+      min-height: 52px;
       display: grid;
       place-items: center;
-      padding: 24px;
-      border-radius: 24px;
-      box-shadow: 0 20px 50px rgb(0 0 0 / 0.12);
-      background: #fff;
-      font-size: clamp(1.4rem, 4.5vw, 2.4rem);
-      line-height: 1.25;
+      padding: 10px 14px;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      background: #0f172a;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
       text-align: center;
-      overflow: auto;
     }
 
-    .face.back {
-      transform: rotateY(180deg);
-      background: #111827;
-      color: #f9fafb;
+    .last-action.flash {
+      animation: actionFlash 0.6s ease-out;
     }
 
-    .controls {
+    @keyframes actionFlash {
+      0% {
+        background: rgba(34, 197, 94, 0.28);
+        border-color: rgba(34, 197, 94, 0.9);
+        transform: scale(1.01);
+      }
+      100% {
+        background: #0f172a;
+        border-color: #334155;
+        transform: scale(1);
+      }
+    }
+
+    .canvas-wrap {
+      width: 100%;
+      height: min(55vh, 480px);
+      border: 1px solid #334155;
+      border-radius: 20px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.16), transparent 34%),
+        radial-gradient(circle at 75% 75%, rgba(34, 197, 94, 0.10), transparent 28%),
+        #071120;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    .values {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
       gap: 8px;
     }
 
-    .hint {
-      margin: 0;
-      font-size: 0.9rem;
-      opacity: 0.65;
+    .value {
+      padding: 10px;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      background: #0f172a;
+      min-height: 72px;
     }
 
-    @media (prefers-color-scheme: dark) {
-      body {
-        background: #020617;
-        color: #e2e8f0;
-      }
+    .value span {
+      display: block;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      margin-bottom: 6px;
+    }
 
-      button {
-        background: #0f172a;
-        border-color: #334155;
-        color: #e2e8f0;
-      }
+    .value b {
+      font-size: 1.05rem;
+      font-variant-numeric: tabular-nums;
+      word-break: break-word;
+    }
 
-      .face {
-        background: #0f172a;
-        color: #e2e8f0;
-      }
+    section.panel {
+      border: 1px solid #1f2937;
+      background: #0f172a;
+      border-radius: 20px;
+      padding: 12px;
+    }
 
-      .face.back {
-        background: #e2e8f0;
-        color: #0f172a;
-      }
+    section.panel h2 {
+      margin: 0 0 10px;
+      font-size: 1.05rem;
+    }
+
+    .settings {
+      display: grid;
+      gap: 12px;
+    }
+
+    .setting {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      background: #020617;
+    }
+
+    .setting label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.92rem;
+      color: #dbeafe;
+    }
+
+    .setting output {
+      color: #93c5fd;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: #3b82f6;
+    }
+
+    select {
+      width: 100%;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 10px;
+      padding: 9px 10px;
+      font-size: 0.95rem;
+    }
+
+    .checkbox-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
+    }
+
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      background: #020617;
+      font-size: 0.9rem;
+      color: #dbeafe;
+    }
+
+    .checkbox input {
+      width: 18px;
+      height: 18px;
+      accent-color: #3b82f6;
+    }
+
+    .log {
+      height: 220px;
+      overflow: auto;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      background: #020617;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
+    .log-line {
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+      word-break: break-word;
+    }
+
+    .log-line.info {
+      color: #cbd5e1;
+    }
+
+    .log-line.action {
+      color: #4ade80;
+      font-weight: 700;
+    }
+
+    .log-line.warn {
+      color: #facc15;
+    }
+
+    .log-line.error {
+      color: #f87171;
+    }
+
+    .footer-note {
+      color: #64748b;
+      font-size: 0.86rem;
+      line-height: 1.4;
     }
   </style>
 </head>
 <body>
-  <main class="wrapper">
-    <header class="topbar">
-      <h1>Флеш-карточки</h1>
-      <div id="counter" class="counter"></div>
-    </header>
+  <main>
+    <h1>Debug DeviceOrientation / DeviceMotion</h1>
+    <p class="subtitle">
+      Нажми «Включить сенсоры» и, если браузер спросит, разреши доступ.
+      3D-прямоугольник показывает ориентацию телефона. Наклон и встряхивание пишутся в лог действиями.
+    </p>
 
     <div class="toolbar">
       <button id="enableBtn" type="button">Включить сенсоры</button>
       <button id="calibrateBtn" type="button" disabled>Центр</button>
+      <button id="testTiltBtn" type="button">Тест наклона</button>
+      <button id="testShakeBtn" type="button">Тест встряхивания</button>
+      <button id="clearLogBtn" type="button">Очистить лог</button>
     </div>
 
-    <div id="status" class="status">
-      Сенсоры выключены. Нажмите «Включить сенсоры», затем разрешите доступ, если браузер спросит.
+    <div id="status">Сенсоры выключены.</div>
+    <div id="lastAction" class="last-action">Ожидание действий...</div>
+
+    <div class="canvas-wrap">
+      <canvas id="canvas"></canvas>
     </div>
 
-    <section class="card" aria-live="polite">
-      <div class="card-inner" id="cardInner">
-        <div class="face front" id="front"></div>
-        <div class="face back" id="back"></div>
+    <div class="values">
+      <div class="value"><span>alpha</span><b id="valAlpha">0.0°</b></div>
+      <div class="value"><span>beta</span><b id="valBeta">0.0°</b></div>
+      <div class="value"><span>gamma</span><b id="valGamma">0.0°</b></div>
+      <div class="value"><span>tilt</span><b id="valTilt">0.0°</b></div>
+      <div class="value"><span>accel / deviation</span><b id="valAcc">0.00</b></div>
+      <div class="value"><span>active axis</span><b id="valAxis">gamma</b></div>
+      <div class="value"><span>tilt armed</span><b id="valArmed">armed</b></div>
+    </div>
+
+    <section class="panel">
+      <h2>Настройки констант</h2>
+
+      <div class="settings">
+        <div class="setting">
+          <label for="tiltThreshold">
+            Порог наклона для действия
+            <output id="tiltThresholdValue">25°</output>
+          </label>
+          <input id="tiltThreshold" type="range" min="5" max="90" step="1" value="25" />
+        </div>
+
+        <div class="setting">
+          <label for="tiltResetThreshold">
+            Порог возврата в центр после наклона
+            <output id="tiltResetThresholdValue">10°</output>
+          </label>
+          <input id="tiltResetThreshold" type="range" min="2" max="45" step="1" value="10" />
+        </div>
+
+        <div class="setting">
+          <label for="tiltCooldownMs">
+            Cooldown наклона
+            <output id="tiltCooldownMsValue">700 ms</output>
+          </label>
+          <input id="tiltCooldownMs" type="range" min="0" max="3000" step="50" value="700" />
+        </div>
+
+        <div class="setting">
+          <label for="shakeAccelThreshold">
+            Порог встряхивания для acceleration
+            <output id="shakeAccelThresholdValue">11.0</output>
+          </label>
+          <input id="shakeAccelThreshold" type="range" min="1" max="30" step="0.5" value="11" />
+        </div>
+
+        <div class="setting">
+          <label for="shakeGravityDeviationThreshold">
+            Порог встряхивания для gravity deviation
+            <output id="shakeGravityDeviationThresholdValue">8.0</output>
+          </label>
+          <input id="shakeGravityDeviationThreshold" type="range" min="1" max="20" step="0.5" value="8" />
+        </div>
+
+        <div class="setting">
+          <label for="shakeCooldownMs">
+            Cooldown встряхивания
+            <output id="shakeCooldownMsValue">900 ms</output>
+          </label>
+          <input id="shakeCooldownMs" type="range" min="0" max="3000" step="50" value="900" />
+        </div>
+
+        <div class="setting">
+          <label for="smoothing">
+            Сглаживание 3D-вида
+            <output id="smoothingValue">0.35</output>
+          </label>
+          <input id="smoothing" type="range" min="0" max="0.95" step="0.01" value="0.35" />
+        </div>
+
+        <div class="setting">
+          <label for="visualScale">
+            Масштаб сцены
+            <output id="visualScaleValue">1.00</output>
+          </label>
+          <input id="visualScale" type="range" min="0.4" max="2.5" step="0.05" value="1" />
+        </div>
+
+        <div class="setting">
+          <label for="viewYaw">
+            Поворот камеры вокруг Y
+            <output id="viewYawValue">-25°</output>
+          </label>
+          <input id="viewYaw" type="range" min="-180" max="180" step="1" value="-25" />
+        </div>
+
+        <div class="setting">
+          <label for="viewPitch">
+            Наклон камеры вокруг X
+            <output id="viewPitchValue">-25°</output>
+          </label>
+          <input id="viewPitch" type="range" min="-90" max="90" step="1" value="-25" />
+        </div>
+
+        <div class="setting">
+          <label for="tiltAxis">Ось для определения наклона</label>
+          <select id="tiltAxis">
+            <option value="auto">auto</option>
+            <option value="gamma">gamma</option>
+            <option value="beta">beta</option>
+          </select>
+        </div>
+
+        <div class="checkbox-grid">
+          <label class="checkbox">
+            <input type="checkbox" id="invertTiltAction" />
+            Инвертировать направление наклона
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="relativeVisual" checked />
+            Относительный 3D-режим от кнопки «Центр»
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="invertAlpha" />
+            Инверсия alpha для 3D
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="invertBeta" />
+            Инверсия beta для 3D
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" id="invertGamma" />
+            Инверсия gamma для 3D
+          </label>
+        </div>
       </div>
     </section>
 
-    <div class="controls">
-      <button id="prevBtn" type="button">Назад</button>
-      <button id="flipBtn" type="button">Перевернуть</button>
-      <button id="nextBtn" type="button">Вперёд</button>
-    </div>
+    <section class="panel">
+      <h2>Лог</h2>
+      <div id="log" class="log"></div>
+    </section>
 
-    <p class="hint">
-      Встряхивание переворачивает карточку. Наклон вправо/влево переключает карточки.
-      Если срабатывает слишком часто, увеличьте пороги в коде.
+    <p class="footer-note">
+      Если направления кажутся неправильными, используй чекбоксы инверсии или кнопку «Центр».
+      На Android обычно не нужен отдельный запрос разрешения, на iOS запрос появится после нажатия кнопки.
     </p>
   </main>
 
   <script>
     "use strict";
 
-    const cards = [
-      { q: "Столица Франции?", a: "Париж" },
-      { q: "2 + 2", a: "4" },
-      { q: "Самая большая планета Солнечной системы", a: "Юпитер" },
-      { q: "Скорость света примерно", a: "300 000 км/с" }
-    ];
+    const $ = (id) => document.getElementById(id);
 
-    const frontEl = document.getElementById("front");
-    const backEl = document.getElementById("back");
-    const cardInnerEl = document.getElementById("cardInner");
-    const statusEl = document.getElementById("status");
-    const counterEl = document.getElementById("counter");
-    const enableBtn = document.getElementById("enableBtn");
-    const calibrateBtn = document.getElementById("calibrateBtn");
-    const prevBtn = document.getElementById("prevBtn");
-    const nextBtn = document.getElementById("nextBtn");
-    const flipBtn = document.getElementById("flipBtn");
+    const canvas = $("canvas");
+    const ctx = canvas.getContext("2d");
 
-    let index = 0;
-    let flipped = false;
-    let sensorsEnabled = false;
+    const settings = {
+      tiltThreshold: 25,
+      tiltResetThreshold: 10,
+      tiltCooldownMs: 700,
+      shakeAccelThreshold: 11,
+      shakeGravityDeviationThreshold: 8,
+      shakeCooldownMs: 900,
+      smoothing: 0.35,
+      visualScale: 1,
+      viewYaw: -25,
+      viewPitch: -25,
+      tiltAxis: "auto",
+      invertTiltAction: false,
+      relativeVisual: true,
+      invertAlpha: false,
+      invertBeta: false,
+      invertGamma: false
+    };
 
-    let latestGamma = 0;
-    let latestBeta = 0;
-    let baseGamma = null;
-    let baseBeta = null;
+    const state = {
+      sensorsEnabled: false,
+      gotOrientation: false,
+      gotMotion: false,
 
-    let tiltArmed = true;
-    let lastTiltAt = 0;
-    let lastShakeAt = 0;
+      raw: {
+        alpha: 0,
+        beta: 0,
+        gamma: 0
+      },
 
-    let gotOrientation = false;
-    let gotMotion = false;
+      display: {
+        alpha: 0,
+        beta: 0,
+        gamma: 0,
+        accMag: 0
+      },
 
-    const TILT_THRESHOLD = 25;
-    const TILT_RESET_THRESHOLD = 10;
-    const TILT_COOLDOWN_MS = 700;
+      base: {
+        alpha: 0,
+        beta: 0,
+        gamma: 0,
+        set: false
+      },
 
-    const SHAKE_ACCEL_THRESHOLD = 11;
-    const SHAKE_GRAVITY_DEVIATION_THRESHOLD = 8;
-    const SHAKE_COOLDOWN_MS = 900;
+      accTarget: 0,
+      currentTilt: 0,
+      activeAxis: "gamma",
 
-    function vibrate(ms = 18) {
-      if ("vibrate" in navigator) navigator.vibrate(ms);
-    }
+      tiltArmed: true,
+      lastTiltAt: 0,
+      lastShakeAt: 0
+    };
 
     function setStatus(text) {
-      statusEl.textContent = text;
+      $("status").textContent = text;
     }
 
-    function render() {
-      frontEl.textContent = cards[index].q;
-      backEl.textContent = cards[index].a;
-      counterEl.textContent = `${index + 1}/${cards.length}`;
-      cardInnerEl.classList.toggle("flipped", flipped);
+    function log(message, type = "info") {
+      const logEl = $("log");
+      const line = document.createElement("div");
+      const time = new Date().toLocaleTimeString("ru-RU");
+      line.className = `log-line ${type}`;
+      line.textContent = `[${time}] ${message}`;
+      logEl.prepend(line);
+
+      while (logEl.children.length > 250) {
+        logEl.removeChild(logEl.lastChild);
+      }
     }
 
-    function goTo(newIndex) {
-      index = (newIndex + cards.length) % cards.length;
-      flipped = false;
-      render();
+    function flashAction(text) {
+      const el = $("lastAction");
+      el.textContent = text;
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
     }
 
-    function flipCard() {
-      flipped = !flipped;
-      cardInnerEl.classList.toggle("flipped", flipped);
-      vibrate();
-    }
-
-    function nextCard() {
-      goTo(index + 1);
-      vibrate();
-    }
-
-    function prevCard() {
-      goTo(index - 1);
-      vibrate();
+    function deg2rad(value) {
+      return value * Math.PI / 180;
     }
 
     function normalizeAngle(value) {
-      let a = value;
-      while (a > 180) a -= 360;
-      while (a < -180) a += 360;
+      if (!Number.isFinite(value)) return 0;
+
+      let a = value % 360;
+      if (a <= -180) a += 360;
+      if (a > 180) a -= 360;
       return a;
     }
 
-    function onOrientation(event) {
-      if (!sensorsEnabled) return;
-      gotOrientation = true;
+    function smoothAngle(current, target, factor) {
+      const delta = normalizeAngle(target - current);
+      return normalizeAngle(current + delta * factor);
+    }
 
-      if (typeof event.gamma !== "number" || typeof event.beta !== "number") return;
+    function validXYZ(obj) {
+      return obj &&
+        Number.isFinite(obj.x) &&
+        Number.isFinite(obj.y) &&
+        Number.isFinite(obj.z);
+    }
 
-      latestGamma = event.gamma;
-      latestBeta = event.beta;
+    function getScreenAngle() {
+      let angle = 0;
 
-      if (baseGamma === null || baseBeta === null) {
-        baseGamma = latestGamma;
-        baseBeta = latestBeta;
-        setStatus("Данные ориентации получены. Если нужно, нажмите «Центр».");
-        return;
+      if (screen.orientation && typeof screen.orientation.angle === "number") {
+        angle = screen.orientation.angle;
+      } else if (typeof window.orientation === "number") {
+        angle = window.orientation;
       }
 
-      const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-      const raw = isLandscape ? latestBeta - baseBeta : latestGamma - baseGamma;
-      const tilt = normalizeAngle(raw);
+      return ((angle % 360) + 360) % 360;
+    }
+
+    function getActiveAxis() {
+      if (settings.tiltAxis !== "auto") return settings.tiltAxis;
+      const screenAngle = getScreenAngle();
+      return screenAngle % 180 === 0 ? "gamma" : "beta";
+    }
+
+    function doTilt(direction, value, source = "sensor") {
+      let dir = direction;
+
+      if (settings.invertTiltAction && (dir === "RIGHT" || dir === "LEFT")) {
+        dir = dir === "RIGHT" ? "LEFT" : "RIGHT";
+      }
+
+      const message =
+        `TILT_${dir} source=${source} axis=${state.activeAxis} ` +
+        `value=${Number(value).toFixed(1)}° threshold=${settings.tiltThreshold.toFixed(0)}°`;
+
+      log(message, "action");
+      flashAction(`TILT_${dir}`);
+    }
+
+    function doShake(value, source, threshold) {
+      const message =
+        `SHAKE source=${source} value=${Number(value).toFixed(2)} ` +
+        `threshold=${Number(threshold || 0).toFixed(2)}`;
+
+      log(message, "action");
+      flashAction("SHAKE");
+    }
+
+    function onOrientation(event) {
+      if (!state.sensorsEnabled) return;
+
+      state.gotOrientation = true;
+
+      const alpha = Number.isFinite(event.alpha) ? event.alpha : 0;
+      const beta = Number.isFinite(event.beta) ? event.beta : 0;
+      const gamma = Number.isFinite(event.gamma) ? event.gamma : 0;
+
+      state.raw.alpha = alpha;
+      state.raw.beta = beta;
+      state.raw.gamma = gamma;
+
+      if (!state.base.set) {
+        state.base.alpha = alpha;
+        state.base.beta = beta;
+        state.base.gamma = gamma;
+        state.base.set = true;
+        log("Автокалибровка базового положения. Нажми «Центр», если нужно переопределить.", "info");
+      }
+
+      const axis = getActiveAxis();
+      state.activeAxis = axis;
+
+      const current = axis === "beta" ? beta : gamma;
+      const base = axis === "beta" ? state.base.beta : state.base.gamma;
+      const tilt = normalizeAngle(current - base);
+
+      state.currentTilt = tilt;
+
       const now = Date.now();
 
-      if (tiltArmed && now - lastTiltAt > TILT_COOLDOWN_MS) {
-        if (tilt > TILT_THRESHOLD) {
-          nextCard();
-          tiltArmed = false;
-          lastTiltAt = now;
-          setStatus("Наклон вправо: следующая карточка");
-        } else if (tilt < -TILT_THRESHOLD) {
-          prevCard();
-          tiltArmed = false;
-          lastTiltAt = now;
-          setStatus("Наклон влево: предыдущая карточка");
+      if (state.tiltArmed && now - state.lastTiltAt > settings.tiltCooldownMs) {
+        if (tilt > settings.tiltThreshold) {
+          doTilt("RIGHT", tilt);
+          state.tiltArmed = false;
+          state.lastTiltAt = now;
+        } else if (tilt < -settings.tiltThreshold) {
+          doTilt("LEFT", tilt);
+          state.tiltArmed = false;
+          state.lastTiltAt = now;
         }
       }
 
-      if (Math.abs(tilt) < TILT_RESET_THRESHOLD) {
-        tiltArmed = true;
+      if (Math.abs(tilt) < settings.tiltResetThreshold) {
+        state.tiltArmed = true;
       }
     }
 
     function onMotion(event) {
-      if (!sensorsEnabled) return;
-      gotMotion = true;
+      if (!state.sensorsEnabled) return;
+
+      state.gotMotion = true;
 
       const now = Date.now();
-      if (now - lastShakeAt < SHAKE_COOLDOWN_MS) return;
 
-      const acc = event.acceleration;
-      if (acc && acc.x !== null && acc.y !== null && acc.z !== null) {
-        const magnitude = Math.hypot(acc.x, acc.y, acc.z);
-        if (magnitude > SHAKE_ACCEL_THRESHOLD) {
-          lastShakeAt = now;
-          flipCard();
-          setStatus("Встряхивание: переворот");
-          return;
+      if (validXYZ(event.acceleration)) {
+        const x = event.acceleration.x;
+        const y = event.acceleration.y;
+        const z = event.acceleration.z;
+
+        const magnitude = Math.hypot(x, y, z);
+        state.accTarget = magnitude;
+
+        if (now - state.lastShakeAt > settings.shakeCooldownMs && magnitude > settings.shakeAccelThreshold) {
+          state.lastShakeAt = now;
+          doShake(magnitude, "acceleration", settings.shakeAccelThreshold);
         }
+
+        return;
       }
 
-      const g = event.accelerationIncludingGravity;
-      if (g && g.x !== null && g.y !== null && g.z !== null) {
-        const magnitude = Math.hypot(g.x, g.y, g.z);
+      if (validXYZ(event.accelerationIncludingGravity)) {
+        const x = event.accelerationIncludingGravity.x;
+        const y = event.accelerationIncludingGravity.y;
+        const z = event.accelerationIncludingGravity.z;
+
+        const magnitude = Math.hypot(x, y, z);
         const deviation = Math.abs(magnitude - 9.81);
-        if (deviation > SHAKE_GRAVITY_DEVIATION_THRESHOLD) {
-          lastShakeAt = now;
-          flipCard();
-          setStatus("Встряхивание: переворот");
+
+        state.accTarget = deviation;
+
+        if (
+          now - state.lastShakeAt > settings.shakeCooldownMs &&
+          deviation > settings.shakeGravityDeviationThreshold
+        ) {
+          state.lastShakeAt = now;
+          doShake(deviation, "gravity-deviation", settings.shakeGravityDeviationThreshold);
         }
       }
     }
 
     async function requestSensorPermissions() {
       const requests = [];
+      const names = [];
 
-      if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      if (
+        typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function"
+      ) {
         requests.push(DeviceOrientationEvent.requestPermission());
+        names.push("orientation");
       }
 
-      if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+      if (
+        typeof DeviceMotionEvent !== "undefined" &&
+        typeof DeviceMotionEvent.requestPermission === "function"
+      ) {
         requests.push(DeviceMotionEvent.requestPermission());
+        names.push("motion");
       }
 
-      if (requests.length === 0) return true;
+      if (requests.length === 0) {
+        return {
+          orientationGranted: true,
+          motionGranted: true
+        };
+      }
 
       const results = await Promise.all(requests);
-      return results.every((result) => result === "granted");
+
+      let orientationGranted = true;
+      let motionGranted = true;
+
+      names.forEach((name, index) => {
+        if (name === "orientation") {
+          orientationGranted = results[index] === "granted";
+        }
+
+        if (name === "motion") {
+          motionGranted = results[index] === "granted";
+        }
+      });
+
+      return {
+        orientationGranted,
+        motionGranted
+      };
     }
 
     async function enableSensors() {
       setStatus("Запрашиваем доступ к сенсорам...");
+      log("Запрос доступа к сенсорам...", "info");
+
+      let permission;
 
       try {
-        const granted = await requestSensorPermissions();
-        if (!granted) {
-          setStatus("Доступ к сенсорам не разрешён. Разрешите доступ в настройках сайта/браузера.");
-          return;
-        }
+        permission = await requestSensorPermissions();
       } catch (error) {
-        setStatus(`Ошибка доступа к сенсорам: ${error.message || error}`);
+        const message = error && error.message ? error.message : String(error);
+        setStatus(`Ошибка доступа к сенсорам: ${message}`);
+        log(`Ошибка доступа к сенсорам: ${message}`, "error");
         return;
       }
 
+      if (!permission.orientationGranted && !permission.motionGranted) {
+        setStatus("Доступ к сенсорам не разрешён.");
+        log("Доступ к сенсорам не разрешён.", "error");
+        return;
+      }
+
+      if (!permission.orientationGranted) {
+        log("Доступ к DeviceOrientation не разрешён.", "warn");
+      }
+
+      if (!permission.motionGranted) {
+        log("Доступ к DeviceMotion не разрешён.", "warn");
+      }
+
       if (!("DeviceOrientationEvent" in window) && !("DeviceMotionEvent" in window)) {
-        setStatus("Браузер не поддерживает DeviceOrientation/DeviceMotion. Кнопки ручного управления остаются рабочими.");
+        setStatus("Браузер не поддерживает DeviceOrientation/DeviceMotion.");
+        log("Браузер не поддерживает DeviceOrientation/DeviceMotion.", "error");
         return;
       }
 
       window.addEventListener("deviceorientation", onOrientation);
       window.addEventListener("devicemotion", onMotion);
 
-      sensorsEnabled = true;
-      enableBtn.disabled = true;
-      calibrateBtn.disabled = false;
-      setStatus("Сенсоры включены. Держите телефон удобно и нажмите «Центр», если нужно.");
+      state.sensorsEnabled = true;
+      $("enableBtn").disabled = true;
+      $("calibrateBtn").disabled = false;
+
+      setStatus("Сенсоры включены.");
+      log("Сенсоры включены.", "info");
 
       setTimeout(() => {
-        if (!sensorsEnabled) return;
+        if (!state.sensorsEnabled) return;
 
-        if (!gotOrientation && !gotMotion) {
-          setStatus("События сенсоров не приходят. Проверьте доступ к датчикам и откройте страницу по HTTPS.");
-        } else if (!gotOrientation) {
-          setStatus("Движение определяется, но наклон не приходит. Наклон может быть недоступен в этом браузере.");
-        } else if (!gotMotion) {
-          setStatus("Наклон работает, но события движения не приходят. Встряхивание может быть недоступно.");
+        if (!state.gotOrientation && !state.gotMotion) {
+          setStatus("События сенсоров не приходят. Проверь доступ датчиков и HTTPS.");
+          log("События сенсоров не приходят. Проверь доступ датчиков и HTTPS.", "warn");
+        } else {
+          if (!state.gotOrientation) {
+            log("DeviceOrientation события не приходят.", "warn");
+          }
+
+          if (!state.gotMotion) {
+            log("DeviceMotion события не приходят.", "warn");
+          }
         }
       }, 2500);
     }
 
-    enableBtn.addEventListener("click", enableSensors);
-
-    calibrateBtn.addEventListener("click", () => {
-      if (!gotOrientation) {
-        setStatus("Данные ориентации ещё не получены.");
+    function calibrateCenter() {
+      if (!state.gotOrientation) {
+        log("Нет данных DeviceOrientation для калибровки.", "warn");
         return;
       }
 
-      baseGamma = latestGamma;
-      baseBeta = latestBeta;
-      tiltArmed = true;
-      setStatus("Нейтральное положение сохранено.");
+      state.base.alpha = state.raw.alpha;
+      state.base.beta = state.raw.beta;
+      state.base.gamma = state.raw.gamma;
+      state.base.set = true;
+
+      state.currentTilt = 0;
+      state.tiltArmed = true;
+
+      log("Центр откалиброван.", "info");
+      setStatus("Центр откалиброван.");
+    }
+
+    function bindRange(id, key, formatter = (value) => String(value)) {
+      const input = $(id);
+      const output = $(`${id}Value`);
+
+      const update = () => {
+        settings[key] = parseFloat(input.value);
+        output.textContent = formatter(settings[key]);
+      };
+
+      input.addEventListener("input", update);
+      update();
+    }
+
+    function bindCheckbox(id, key) {
+      const input = $(id);
+
+      const update = () => {
+        settings[key] = input.checked;
+      };
+
+      input.addEventListener("change", update);
+      update();
+    }
+
+    const fmtDeg = (value) => `${Math.round(value)}°`;
+    const fmtMs = (value) => `${Math.round(value)} ms`;
+    const fmtNum1 = (value) => value.toFixed(1);
+    const fmtNum2 = (value) => value.toFixed(2);
+
+    bindRange("tiltThreshold", "tiltThreshold", fmtDeg);
+    bindRange("tiltResetThreshold", "tiltResetThreshold", fmtDeg);
+    bindRange("tiltCooldownMs", "tiltCooldownMs", fmtMs);
+    bindRange("shakeAccelThreshold", "shakeAccelThreshold", fmtNum1);
+    bindRange("shakeGravityDeviationThreshold", "shakeGravityDeviationThreshold", fmtNum1);
+    bindRange("shakeCooldownMs", "shakeCooldownMs", fmtMs);
+    bindRange("smoothing", "smoothing", fmtNum2);
+    bindRange("visualScale", "visualScale", fmtNum2);
+    bindRange("viewYaw", "viewYaw", fmtDeg);
+    bindRange("viewPitch", "viewPitch", fmtDeg);
+
+    bindCheckbox("invertTiltAction", "invertTiltAction");
+    bindCheckbox("relativeVisual", "relativeVisual");
+    bindCheckbox("invertAlpha", "invertAlpha");
+    bindCheckbox("invertBeta", "invertBeta");
+    bindCheckbox("invertGamma", "invertGamma");
+
+    const tiltAxisEl = $("tiltAxis");
+    tiltAxisEl.value = settings.tiltAxis;
+    tiltAxisEl.addEventListener("change", () => {
+      settings.tiltAxis = tiltAxisEl.value;
+      log(`Ось наклона установлена: ${settings.tiltAxis}`, "info");
+    });
+
+    $("enableBtn").addEventListener("click", enableSensors);
+    $("calibrateBtn").addEventListener("click", calibrateCenter);
+
+    $("clearLogBtn").addEventListener("click", () => {
+      $("log").innerHTML = "";
+      log("Лог очищен.", "info");
+    });
+
+    $("testTiltBtn").addEventListener("click", () => {
+      const value = Math.abs(state.currentTilt) > 0.1
+        ? state.currentTilt
+        : settings.tiltThreshold + 1;
+
+      doTilt("RIGHT", value, "test");
+    });
+
+    $("testShakeBtn").addEventListener("click", () => {
+      doShake(settings.shakeAccelThreshold + 1, "test", settings.shakeAccelThreshold);
     });
 
     window.addEventListener("orientationchange", () => {
-      if (!sensorsEnabled) return;
-      baseGamma = latestGamma;
-      baseBeta = latestBeta;
-      tiltArmed = true;
-      setStatus("Ориентация экрана изменилась. При необходимости нажмите «Центр».");
+      const axis = getActiveAxis();
+      state.activeAxis = axis;
+      log(`Ориентация экрана изменилась: ${getScreenAngle()}°, активная ось: ${axis}`, "info");
     });
 
-    prevBtn.addEventListener("click", prevCard);
-    nextBtn.addEventListener("click", nextCard);
-    flipBtn.addEventListener("click", flipCard);
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
 
-    render();
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    function rotatePointY(point, angle) {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+
+      return {
+        x: point.x * c + point.z * s,
+        y: point.y,
+        z: -point.x * s + point.z * c
+      };
+    }
+
+    function rotatePointX(point, angle) {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+
+      return {
+        x: point.x,
+        y: point.y * c - point.z * s,
+        z: point.y * s + point.z * c
+      };
+    }
+
+    let currentScale = 100;
+
+    function project(point) {
+      let p = rotatePointY(point, deg2rad(settings.viewYaw));
+      p = rotatePointX(p, deg2rad(settings.viewPitch));
+
+      const cameraDistance = 5;
+      const focal = 4.5;
+
+      const z = p.z + cameraDistance;
+      const scale = focal / Math.max(0.1, z) * currentScale;
+
+      return {
+        x: p.x * scale,
+        y: -p.y * scale,
+        z
+      };
+    }
+
+    function drawLine(a, b, color, alpha = 1, width = 2) {
+      const p1 = project(a);
+      const p2 = project(b);
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawArrow(a, b, color, label = "", width = 2) {
+      const p1 = project(a);
+      const p2 = project(b);
+
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = width;
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+
+      const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+      const size = 10;
+
+      ctx.beginPath();
+      ctx.moveTo(p2.x, p2.y);
+      ctx.lineTo(
+        p2.x - size * Math.cos(angle - Math.PI / 6),
+        p2.y - size * Math.sin(angle - Math.PI / 6)
+      );
+      ctx.lineTo(
+        p2.x - size * Math.cos(angle + Math.PI / 6),
+        p2.y - size * Math.sin(angle + Math.PI / 6)
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      if (label) {
+        ctx.font = "12px system-ui, sans-serif";
+        ctx.fillText(label, p2.x + 10, p2.y - 7);
+      }
+
+      ctx.restore();
+    }
+
+    function drawAxes() {
+      const origin = { x: 0, y: 0, z: 0 };
+      const length = 1.6;
+
+      drawLine(origin, { x: -length, y: 0, z: 0 }, "#f87171", 0.22, 1);
+      drawLine(origin, { x: 0, y: -length, z: 0 }, "#4ade80", 0.22, 1);
+      drawLine(origin, { x: 0, y: 0, z: -length }, "#60a5fa", 0.22, 1);
+
+      drawArrow(origin, { x: length, y: 0, z: 0 }, "#f87171", "X");
+      drawArrow(origin, { x: 0, y: length, z: 0 }, "#4ade80", "Y");
+      drawArrow(origin, { x: 0, y: 0, z: length }, "#60a5fa", "Z");
+    }
+
+    function matrixRotX(angle) {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+
+      return [
+        [1, 0, 0],
+        [0, c, -s],
+        [0, s, c]
+      ];
+    }
+
+    function matrixRotY(angle) {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+
+      return [
+        [c, 0, s],
+        [0, 1, 0],
+        [-s, 0, c]
+      ];
+    }
+
+    function matrixRotZ(angle) {
+      const c = Math.cos(angle);
+      const s = Math.sin(angle);
+
+      return [
+        [c, -s, 0],
+        [s, c, 0],
+        [0, 0, 1]
+      ];
+    }
+
+    function multiplyMatrices(a, b) {
+      const result = [
+        [0, 0, 0],
+        [0, 0, 0],
+        [0, 0, 0]
+      ];
+
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          for (let k = 0; k < 3; k++) {
+            result[i][j] += a[i][k] * b[k][j];
+          }
+        }
+      }
+
+      return result;
+    }
+
+    function applyMatrix(matrix, point) {
+      return {
+        x: matrix[0][0] * point.x + matrix[0][1] * point.y + matrix[0][2] * point.z,
+        y: matrix[1][0] * point.x + matrix[1][1] * point.y + matrix[1][2] * point.z,
+        z: matrix[2][0] * point.x + matrix[2][1] * point.y + matrix[2][2] * point.z
+      };
+    }
+
+    function getOrientationMatrix() {
+      let alpha = state.display.alpha;
+      let beta = state.display.beta;
+      let gamma = state.display.gamma;
+
+      if (settings.relativeVisual && state.base.set) {
+        alpha = normalizeAngle(alpha - state.base.alpha);
+        beta = normalizeAngle(beta - state.base.beta);
+        gamma = normalizeAngle(gamma - state.base.gamma);
+      }
+
+      if (settings.invertAlpha) alpha = -alpha;
+      if (settings.invertBeta) beta = -beta;
+      if (settings.invertGamma) gamma = -gamma;
+
+      const alphaRad = deg2rad(alpha);
+      const betaRad = deg2rad(beta);
+      const gammaRad = deg2rad(gamma);
+
+      return multiplyMatrices(
+        matrixRotY(alphaRad),
+        multiplyMatrices(
+          matrixRotX(betaRad),
+          matrixRotZ(-gammaRad)
+        )
+      );
+    }
+
+    function drawPhone() {
+      const matrix = getOrientationMatrix();
+
+      const width = 0.8;
+      const height = 1.6;
+
+      const cornersLocal = [
+        { x: -width / 2, y: -height / 2, z: 0 },
+        { x: width / 2, y: -height / 2, z: 0 },
+        { x: width / 2, y: height / 2, z: 0 },
+        { x: -width / 2, y: height / 2, z: 0 }
+      ];
+
+      const projected = cornersLocal.map((point) => project(applyMatrix(matrix, point)));
+
+      ctx.save();
+      ctx.beginPath();
+
+      projected.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x, point.y);
+        else ctx.lineTo(point.x, point.y);
+      });
+
+      ctx.closePath();
+
+      ctx.fillStyle = "rgba(96, 165, 250, 0.22)";
+      ctx.fill();
+
+      ctx.strokeStyle = "#93c5fd";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.restore();
+
+      const centerWorld = applyMatrix(matrix, { x: 0, y: 0, z: 0 });
+      const topWorld = applyMatrix(matrix, { x: 0, y: height / 2 + 0.35, z: 0 });
+      const normalWorld = applyMatrix(matrix, { x: 0, y: 0, z: 0.55 });
+
+      drawArrow(centerWorld, topWorld, "#fbbf24", "TOP", 2);
+      drawArrow(centerWorld, normalWorld, "#38bdf8", "N", 1.5);
+    }
+
+    function draw() {
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.save();
+      ctx.translate(width / 2, height / 2);
+
+      currentScale = Math.min(width, height) / 4 * settings.visualScale;
+
+      drawAxes();
+      drawPhone();
+
+      ctx.restore();
+    }
+
+    function updateValues() {
+      $("valAlpha").textContent = `${normalizeAngle(state.display.alpha).toFixed(1)}°`;
+      $("valBeta").textContent = `${normalizeAngle(state.display.beta).toFixed(1)}°`;
+      $("valGamma").textContent = `${normalizeAngle(state.display.gamma).toFixed(1)}°`;
+      $("valTilt").textContent = `${state.currentTilt.toFixed(1)}°`;
+      $("valAcc").textContent = state.display.accMag.toFixed(2);
+      $("valAxis").textContent = state.activeAxis;
+      $("valArmed").textContent = state.tiltArmed ? "armed" : "blocked";
+    }
+
+    function animate() {
+      const factor = Math.max(0.0001, 1 - settings.smoothing);
+
+      state.display.alpha = smoothAngle(state.display.alpha, state.raw.alpha, factor);
+      state.display.beta = smoothAngle(state.display.beta, state.raw.beta, factor);
+      state.display.gamma = smoothAngle(state.display.gamma, state.raw.gamma, factor);
+
+      state.display.accMag += (state.accTarget - state.display.accMag) * factor;
+
+      updateValues();
+      draw();
+
+      requestAnimationFrame(animate);
+    }
+
+    log("Страница готова. Нажми «Включить сенсоры».", "info");
+    animate();
   </script>
 </body>
 </html>
