@@ -1,754 +1,661 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
-  />
-  <title>Лабиринт наклоном</title>
-  <style>
-    html,
-    body {
-      margin: 0;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-      background: #050b18;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      touch-action: manipulation;
-    }
-
-    body {
-      user-select: none;
-      -webkit-user-select: none;
-    }
-
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-    }
-
-    #overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 30;
-      display: grid;
-      place-items: center;
-      padding: 20px;
-      text-align: center;
-      color: #e2e8f0;
-      background: rgba(2, 6, 23, 0.78);
-      font-size: 20px;
-      line-height: 1.4;
-      cursor: pointer;
-      backdrop-filter: blur(10px);
-      white-space: pre-line;
-    }
-
-    #overlay.hidden {
-      display: none;
-    }
-
-    #levelIndicator {
-      position: fixed;
-      top: max(10px, env(safe-area-inset-top));
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      padding: 6px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(148, 163, 184, 0.22);
-      background: rgba(2, 6, 23, 0.35);
-      color: rgba(226, 232, 240, 0.9);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      backdrop-filter: blur(8px);
-      pointer-events: none;
-    }
-
-    #hint {
-      position: fixed;
-      bottom: max(12px, env(safe-area-inset-bottom));
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      color: rgba(148, 163, 184, 0.6);
-      font-size: 11px;
-      text-align: center;
-      pointer-events: none;
-      line-height: 1.35;
-      white-space: pre-line;
-    }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>3D Maze · WebGPU</title>
+<style>
+  html, body { margin:0; width:100vw; height:100vh; overflow:hidden;
+    background:#050b18; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    touch-action:manipulation; user-select:none; -webkit-user-select:none; }
+  canvas { display:block; width:100vw; height:100vh; }
+  #overlay { position:fixed; inset:0; z-index:30; display:grid; place-items:center;
+    padding:20px; text-align:center; color:#e2e8f0; background:rgba(2,6,23,.78);
+    font-size:20px; line-height:1.4; cursor:pointer; backdrop-filter:blur(10px);
+    white-space:pre-line; }
+  #overlay.hidden { display:none; }
+</style>
 </head>
 <body>
-  <div id="overlay">
-    Нажми, чтобы включить
-    управление наклоном
-  </div>
+<div id="overlay">Нажми, чтобы начать
+(наклон / мышь / WASD)</div>
+<canvas id="canvas"></canvas>
 
-  <div id="levelIndicator" class="hidden">Уровень 1/5</div>
-  <div id="hint" class="hidden">2 тапа — калибровка · 3 тапа — рестарт</div>
+<script type="module">
+"use strict";
 
-  <canvas id="canvas"></canvas>
+// ===========================================================================
+//  Constants
+// ===========================================================================
+const CELL = 4.0;
+const WALL_H = 3.2;
+const BALL_R = 0.55;
+const CAM_HEIGHT = 8.5;
+const CAM_BACK = 9.0;
+const FOV_DEG = 55;
+const MAX_TILT_DEG = 24;
+const ACCEL_PER_DEG = 1.05;
+const FRICTION = 2.4;
+const RESTITUTION = 0.25;
+const MAX_SPEED = 13;
+const VIEW_RADIUS = 22;   // в клетках вокруг шарика
+const MSAA = 4;
+const SENSOR_FILTER = 0.16;
+const CALIB_SAMPLES = 25;
+const DEAD_ZONE = 0.05;
 
-  <script>
-    "use strict";
+// ===========================================================================
+//  Maze generation (hash-based, infinite)
+// ===========================================================================
+function hashXY(x, z) {
+  let h = (Math.imul(x, 374761393) ^ Math.imul(z, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = (h ^ (h >>> 16)) | 0;
+  return h >>> 0;
+}
+function doorEast(rx, rz) { return (hashXY(rx, rz) & 255) < 140; }
+function doorSouth(rx, rz) { return ((hashXY(rx, rz) >>> 8) & 255) < 140; }
+function isSolid(x, z) {
+  if ((x & 1) === 0 && (z & 1) === 0) return true;
+  if ((x & 1) === 1 && (z & 1) === 1) return false;
+  if ((x & 1) === 0) {
+    const a = (x >> 1) - 1, b = (x >> 1), r = (z - 1) >> 1;
+    return !(doorEast(a, r) || doorEast(b - 1, r));
+  }
+  const r = (x - 1) >> 1, a = (z >> 1) - 1, b = (z >> 1);
+  return !(doorSouth(r, a) || doorSouth(r, b - 1));
+}
 
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const overlay = document.getElementById("overlay");
-    const levelIndicator = document.getElementById("levelIndicator");
-    const hint = document.getElementById("hint");
+// ===========================================================================
+//  Ball physics
+// ===========================================================================
+const ball = { x: CELL * 1.5, z: CELL * 1.5, vx: 0, vz: 0 };
+let ballRot = [1,0,0, 0,1,0, 0,0,1];
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 
-    const LEVEL_SIZES = [7, 9, 11, 13, 15];
-    const TOTAL_LEVELS = LEVEL_SIZES.length;
+function collidesAt(bx, bz) {
+  const R = BALL_R;
+  const x0 = Math.floor((bx - R) / CELL) - 1, x1 = Math.floor((bx + R) / CELL) + 1;
+  const z0 = Math.floor((bz - R) / CELL) - 1, z1 = Math.floor((bz + R) / CELL) + 1;
+  for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (!isSolid(x, z)) continue;
+    const nx = clamp(bx, x*CELL, (x+1)*CELL), nz = clamp(bz, z*CELL, (z+1)*CELL);
+    const dx = bx-nx, dz = bz-nz;
+    if (dx*dx + dz*dz < R*R) return true;
+  }
+  return false;
+}
+function stepBall(dt) {
+  const t = currentTilt();
+  ball.vx += t.tx * ACCEL_PER_DEG * dt;
+  ball.vz += t.ty * ACCEL_PER_DEG * dt;
+  const damp = Math.exp(-FRICTION * dt);
+  ball.vx *= damp; ball.vz *= damp;
+  const sp = Math.hypot(ball.vx, ball.vz);
+  if (sp > MAX_SPEED) { ball.vx *= MAX_SPEED/sp; ball.vz *= MAX_SPEED/sp; }
+  const steps = 4, sdt = dt/steps;
+  for (let i=0;i<steps;i++){
+    const nx = ball.x + ball.vx*sdt;
+    if (collidesAt(nx, ball.z)) ball.vx = -ball.vx*RESTITUTION; else ball.x = nx;
+    const nz = ball.z + ball.vz*sdt;
+    if (collidesAt(ball.x, nz)) ball.vz = -ball.vz*RESTITUTION; else ball.z = nz;
+  }
+  const speed = Math.hypot(ball.vx, ball.vz);
+  if (speed > 1e-4) {
+    const axis = { x: ball.vz/speed, y: 0, z: -ball.vx/speed };
+    ballRot = mulMat3(axisAngleMat3(axis, speed*dt/BALL_R), ballRot);
+  }
+}
 
-    const SENSOR_FILTER = 0.16;
-    const CALIBRATION_SAMPLES = 25;
-    const ACCEL_FACTOR = 90;
-    const DEAD_ZONE_DEG = 0.6;
-    const FRICTION = 2.6;
-    const RESTITUTION = 0.28;
-    const MAX_SPEED = 1300;
+// ===========================================================================
+//  Input
+// ===========================================================================
+function norm3(v){ const l=Math.hypot(v.x,v.y,v.z); return l<1e-9?null:{x:v.x/l,y:v.y/l,z:v.z/l}; }
+const dot3=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const cross3=(a,b)=>({x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x});
+function identMat3(){ return [1,0,0, 0,1,0, 0,0,1]; }
+function axisAngleMat3(ax,ang){
+  const x=ax.x,y=ax.y,z=ax.z,c=Math.cos(ang),s=Math.sin(ang),t=1-c;
+  return [t*x*x+c, t*x*y-s*z, t*x*z+s*y,
+          t*x*y+s*z, t*y*y+c, t*y*z-s*x,
+          t*x*z-s*y, t*y*z+s*x, t*z*z+c];
+}
+function mulMat3(a,b){
+  const o=new Array(9);
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++)
+    o[r*3+c]=a[r*3+0]*b[0*3+c]+a[r*3+1]*b[1*3+c]+a[r*3+2]*b[2*3+c];
+  return o;
+}
+function matFromTo(f,t){
+  const a=norm3(f), b=norm3(t);
+  if(!a||!b) return identMat3();
+  const d=clamp(dot3(a,b),-1,1);
+  if(d>0.99999) return identMat3();
+  if(d<-0.99999) return axisAngleMat3({x:1,y:0,z:0},Math.PI);
+  const ax=norm3(cross3(a,b));
+  return ax?axisAngleMat3(ax,Math.acos(d)):identMat3();
+}
+function applyMat3(m,v){
+  return { x:m[0]*v.x+m[1]*v.y+m[2]*v.z,
+           y:m[3]*v.x+m[4]*v.y+m[5]*v.z,
+           z:m[6]*v.x+m[7]*v.y+m[8]*v.z };
+}
+const validXYZ=o=>o&&Number.isFinite(o.x)&&Number.isFinite(o.y)&&Number.isFinite(o.z);
 
-    let vw = window.innerWidth;
-    let vh = window.innerHeight;
-    let dpr = window.devicePixelRatio || 1;
+const state={ motionEnabled:false, hasAccel:false, baseSet:false, samples:[],
+  accel:{x:0,y:0,z:0}, baseMatrix:null, baseTargetZ:1 };
 
-    let currentLevel = 0;
-    let overlayMode = "start";
-    let overlayVisible = true;
-
-    let cols = 0;
-    let rows = 0;
-    let cellSize = 0;
-    let offsetX = 0;
-    let offsetY = 0;
-    let grid = [];
-    let startCell = { x: 1, y: 1 };
-    let exitCell = { x: 1, y: 1 };
-
-    const ball = {
-      x: 0,
-      y: 0,
-      vx: 0,
-      vy: 0,
-      radius: 10
-    };
-
-    const state = {
-      motionEnabled: false,
-      hasAccel: false,
-      baseSet: false,
-      samples: [],
-      accel: { x: 0, y: 0, z: 0 },
-      baseMatrix: null,
-      baseTargetZ: 1
-    };
-
-    let tapCount = 0;
-    let tapTimer = null;
-
-    function clamp(value, min, max) {
-      return Math.max(min, Math.min(max, value));
-    }
-
-    function normalizeVector(v) {
-      const len = Math.hypot(v.x, v.y, v.z);
-
-      if (len < 0.000001) {
-        return null;
+function onMotion(ev){
+  if(!state.motionEnabled) return;
+  const g=ev.accelerationIncludingGravity;
+  if(!validXYZ(g)) return;
+  if(!state.hasAccel){ state.accel={x:g.x,y:g.y,z:g.z}; state.hasAccel=true; }
+  else{
+    state.accel.x+=(g.x-state.accel.x)*SENSOR_FILTER;
+    state.accel.y+=(g.y-state.accel.y)*SENSOR_FILTER;
+    state.accel.z+=(g.z-state.accel.z)*SENSOR_FILTER;
+  }
+  if(!state.baseSet){
+    state.samples.push({x:state.accel.x,y:state.accel.y,z:state.accel.z});
+    if(state.samples.length>=CALIB_SAMPLES){
+      let sx=0,sy=0,sz=0;
+      for(const s of state.samples){sx+=s.x;sy+=s.y;sz+=s.z;}
+      const n=state.samples.length, av=norm3({x:sx/n,y:sy/n,z:sz/n});
+      if(av){
+        const tz=av.z>=0?1:-1;
+        state.baseTargetZ=tz;
+        state.baseMatrix=matFromTo(av,{x:0,y:0,z:tz});
+        state.baseSet=true;
       }
-
-      return {
-        x: v.x / len,
-        y: v.y / len,
-        z: v.z / len
-      };
+      state.samples=[];
     }
+  }
+}
+function sensorTilt(){
+  if(!state.hasAccel||!state.baseSet||!state.baseMatrix) return null;
+  const c=norm3(state.accel); if(!c) return null;
+  const v=applyMat3(state.baseMatrix,c);
+  const sx=clamp(-v.x*state.baseTargetZ,-1,1);
+  const sy=clamp( v.y*state.baseTargetZ,-1,1);
+  return { tx: Math.asin(sx)*180/Math.PI, ty: Math.asin(sy)*180/Math.PI };
+}
+const mouse={x:0,y:0,active:false};
+window.addEventListener("mousemove", e=>{
+  mouse.x=(e.clientX/window.innerWidth -0.5)*2;
+  mouse.y=(e.clientY/window.innerHeight-0.5)*2;
+  mouse.active=true;
+});
+const keys={};
+window.addEventListener("keydown", e=>{ keys[e.code]=true; });
+window.addEventListener("keyup",   e=>{ keys[e.code]=false; });
 
-    function dotVec(a, b) {
-      return a.x * b.x + a.y * b.y + a.z * b.z;
+function currentTilt(){
+  if(state.motionEnabled && state.baseSet){
+    const s=sensorTilt();
+    if(s){
+      if(Math.hypot(s.tx,s.ty) < 1.5) return {tx:0,ty:0};
+      return s;
     }
+  }
+  let mx=mouse.active?mouse.x:0, my=mouse.active?mouse.y:0;
+  if(keys.KeyA||keys.ArrowLeft)  mx-=1;
+  if(keys.KeyD||keys.ArrowRight) mx+=1;
+  if(keys.KeyW||keys.ArrowUp)    my-=1;
+  if(keys.KeyS||keys.ArrowDown)  my+=1;
+  mx=clamp(mx,-1,1); my=clamp(my,-1,1);
+  if(Math.hypot(mx,my)<DEAD_ZONE) return {tx:0,ty:0};
+  return { tx: mx*MAX_TILT_DEG, ty: my*MAX_TILT_DEG };
+}
 
-    function crossVec(a, b) {
-      return {
-        x: a.y * b.z - a.z * b.y,
-        y: a.z * b.x - a.x * b.z,
-        z: a.x * b.y - a.y * b.x
-      };
+// ===========================================================================
+//  WebGPU init
+// ===========================================================================
+const canvas=document.getElementById("canvas");
+if(!("gpu" in navigator)){ alert("WebGPU не поддерживается"); throw new Error("no webgpu"); }
+const adapter=await navigator.gpu.requestAdapter();
+if(!adapter){ alert("WebGPU: адаптер не найден"); throw new Error("no adapter"); }
+const device=await adapter.requestDevice();
+const context=canvas.getContext("webgpu");
+const format=navigator.gpu.getPreferredCanvasFormat();
+
+let depthTex=null, msaaTex=null;
+function sizeCanvas(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.floor(window.innerWidth*dpr);
+  canvas.height=Math.floor(window.innerHeight*dpr);
+  context.configure({ device, format, alphaMode:"opaque" });
+  if(depthTex) depthTex.destroy();
+  if(msaaTex) msaaTex.destroy();
+  msaaTex=device.createTexture({
+    size:[canvas.width,canvas.height],
+    format,
+    sampleCount:MSAA,
+    usage:GPUTextureUsage.RENDER_ATTACHMENT
+  });
+  depthTex=device.createTexture({
+    size:[canvas.width,canvas.height],
+    format:"depth24plus",
+    sampleCount:MSAA,
+    usage:GPUTextureUsage.RENDER_ATTACHMENT
+  });
+}
+sizeCanvas();
+window.addEventListener("resize", sizeCanvas);
+
+// ===========================================================================
+//  WGSL (процедурные материалы, без внешних текстур)
+// ===========================================================================
+const WGSL = `
+struct Globals {
+  view    : mat4x4<f32>,
+  proj    : mat4x4<f32>,
+  camPos  : vec3<f32>,
+  _pad0   : f32,
+  ballPos : vec3<f32>,
+  _pad1   : f32,
+  rot0    : vec3<f32>,
+  _pad2   : f32,
+  rot1    : vec3<f32>,
+  _pad3   : f32,
+  rot2    : vec3<f32>,
+  _pad4   : f32,
+};
+@group(0) @binding(0) var<uniform> G : Globals;
+
+struct VOut {
+  @builtin(position) pos : vec4<f32>,
+  @location(0) nrm  : vec3<f32>,
+  @location(1) wpos : vec3<f32>,
+  @location(2) matW : vec4<f32>,
+  @location(3) local: vec3<f32>,
+  @location(4) kind : f32,
+};
+
+@vertex
+fn vs_maze(
+  @location(0) cp : vec3<f32>,
+  @location(1) cn : vec3<f32>,
+  @location(2) ip : vec4<f32>,
+  @location(3) is : vec4<f32>,
+  @location(4) ic : vec4<f32>
+) -> VOut {
+  var o : VOut;
+  let w = ip.xyz + cp * is.xyz;
+  o.wpos = w;
+  o.nrm  = cn;
+  o.matW = ic;
+  o.local = cp;
+  o.kind = 0.0;
+  o.pos  = G.proj * (G.view * vec4<f32>(w, 1.0));
+  return o;
+}
+
+@vertex
+fn vs_ball(
+  @location(0) sp : vec3<f32>,
+  @location(1) sn : vec3<f32>
+) -> VOut {
+  var o : VOut;
+  let R = mat3x3<f32>(G.rot0, G.rot1, G.rot2);
+  let local = R * sp;
+  let w = G.ballPos + local * ${BALL_R.toFixed(4)};
+  o.wpos = w;
+  o.nrm  = R * sn;
+  o.matW = vec4<f32>(0.0);
+  o.local = sp;          // локальная (НЕ повёрнутая) координата — узор крутится с шаром
+  o.kind = 1.0;
+  o.pos  = G.proj * (G.view * vec4<f32>(w, 1.0));
+  return o;
+}
+
+fn hash31(p: vec3<f32>) -> f32 {
+  var q = fract(p * 0.3183099 + vec3<f32>(0.11, 0.17, 0.13));
+  q = q * (q + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+fn vnoise(p: vec3<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let n000 = hash31(i);
+  let n100 = hash31(i + vec3<f32>(1,0,0));
+  let n010 = hash31(i + vec3<f32>(0,1,0));
+  let n110 = hash31(i + vec3<f32>(1,1,0));
+  let n001 = hash31(i + vec3<f32>(0,0,1));
+  let n101 = hash31(i + vec3<f32>(1,0,1));
+  let n011 = hash31(i + vec3<f32>(0,1,1));
+  let n111 = hash31(i + vec3<f32>(1,1,1));
+  let x00 = mix(n000, n100, u.x);
+  let x10 = mix(n010, n110, u.x);
+  let x01 = mix(n001, n101, u.x);
+  let x11 = mix(n011, n111, u.x);
+  return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z);
+}
+fn fbm2(p: vec3<f32>) -> f32 {
+  return vnoise(p) * 0.65 + vnoise(p * 2.7) * 0.35;
+}
+
+fn heightBands(h: f32) -> vec4<f32> {
+  let g  = 1.0 - smoothstep(0.02, 0.5, h);
+  let sa = smoothstep(0.02, 0.5, h) * (1.0 - smoothstep(0.5, 1.2, h));
+  let ro = smoothstep(0.5, 1.2, h) * (1.0 - smoothstep(${(WALL_H-0.6).toFixed(2)}, ${(WALL_H-0.15).toFixed(2)}, h));
+  let sn = smoothstep(${(WALL_H-0.6).toFixed(2)}, ${(WALL_H-0.15).toFixed(2)}, h);
+  return vec4<f32>(g, sa, ro, sn);
+}
+
+fn mazeAlbedo(wp: vec3<f32>) -> vec3<f32> {
+  let w = heightBands(wp.y);
+  let grain = fbm2(wp * 1.6);
+  let grain2 = fbm2(wp * 5.0);
+
+  let cell = floor(wp.xz / ${CELL.toFixed(2)});
+  let chk = f32(((i32(cell.x) + i32(cell.y)) & 1) == 0);
+  var floorC = mix(vec3<f32>(0.045,0.070,0.125), vec3<f32>(0.075,0.110,0.185), chk);
+  floorC *= 0.85 + 0.3 * grain;
+
+  var sandC = vec3<f32>(0.32,0.30,0.24) * (0.8 + 0.4 * grain);
+
+  var rockC = mix(vec3<f32>(0.16,0.22,0.36), vec3<f32>(0.30,0.38,0.55), grain);
+  rockC *= 0.85 + 0.3 * grain2;
+  let stripe = smoothstep(0.45, 0.55, fract(wp.y * 0.9 + grain * 0.3));
+  rockC *= 0.9 + 0.18 * stripe;
+
+  var snowC = vec3<f32>(0.80,0.85,0.95) * (0.9 + 0.2 * grain2);
+
+  return floorC * w.x + sandC * w.y + rockC * w.z + snowC * w.w;
+}
+
+// Процедурное окружение для отражений шарика
+fn envColor(rd: vec3<f32>, L: vec3<f32>) -> vec3<f32> {
+  let up = smoothstep(-0.05, 0.5, rd.y);
+  let sky = mix(vec3<f32>(0.045,0.065,0.11), vec3<f32>(0.14,0.22,0.38), up);
+  let ground = mix(vec3<f32>(0.03,0.045,0.08), sky, smoothstep(-0.4, -0.02, rd.y));
+  var c = mix(ground, sky, up);
+  c += vec3<f32>(1.0,0.95,0.85) * pow(max(dot(rd, L), 0.0), 240.0) * 5.0;
+  c += vec3<f32>(0.20,0.28,0.45) * exp(-abs(rd.y) * 7.0) * 0.35;
+  return c;
+}
+
+@fragment
+fn fs_main(i : VOut) -> @location(0) vec4<f32> {
+  let L = normalize(vec3<f32>(30.0, 60.0, 20.0));
+  let Vv = normalize(G.camPos - i.wpos);
+  let dist = distance(G.camPos, i.wpos);
+  let fogF = clamp(exp(-pow(dist * 0.020, 2.0)), 0.0, 1.0);
+  var col : vec3<f32>;
+
+  if (i.kind > 0.5) {
+    // Чёрный полированный шар с микро-рельефом в ЛОКАЛЬНЫХ координатах:
+    // рельеф повёрнут матрицей шара, поэтому отражение бежит при качении.
+    let Rm = mat3x3<f32>(G.rot0, G.rot1, G.rot2);
+    let a = vec3<f32>(11.0, 7.0, 13.0);
+    let g1 = cos(dot(i.local, a)) * a;
+    let g1t = g1 - i.local * dot(g1, i.local);
+    let b = vec3<f32>(-7.0, 15.0, -9.0);
+    let g2 = cos(dot(i.local, b) * 0.7) * (b * 0.7);
+    let g2t = g2 - i.local * dot(g2, i.local);
+    let nl = normalize(i.local + (g1t + g2t) * 0.055);
+    let n = normalize(Rm * nl);
+
+    let R = reflect(-Vv, n);
+    let fres = 0.05 + 0.95 * pow(1.0 - max(dot(n, Vv), 0.0), 5.0);
+    let ndl = max(dot(n, L), 0.0);
+    col = vec3<f32>(0.012) * (0.3 + 0.7 * ndl)
+        + fres * envColor(R, L)
+        + vec3<f32>(1.0) * pow(max(dot(n, normalize(L + Vv)), 0.0), 180.0) * 0.8;
+  } else {
+    let n = normalize(i.nrm);
+    let albedo = mazeAlbedo(i.wpos);
+    let ndl = max(dot(n, L), 0.0);
+    let hv = normalize(L + Vv);
+    let spec = pow(max(dot(n, hv), 0.0), 48.0) * 0.12;
+    col = albedo * (0.30 + 0.85 * ndl) + vec3<f32>(1.0) * spec;
+  }
+
+  col = mix(vec3<f32>(0.015,0.02,0.045), col, fogF);
+  return vec4<f32>(col, 1.0);
+}
+`;
+const shaderModule = device.createShaderModule({ code: WGSL });
+
+// ===========================================================================
+//  Cube geometry: interleaved pos+normal, по ВЕРШИНЕ
+// ===========================================================================
+function buildCube() {
+  const faces = [
+    { n:[ 1, 0, 0], v:[[1,0,1],[1,0,0],[1,1,0],[1,1,1]] },
+    { n:[-1, 0, 0], v:[[0,0,0],[0,0,1],[0,1,1],[0,1,0]] },
+    { n:[ 0, 1, 0], v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },
+    { n:[ 0,-1, 0], v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },
+    { n:[ 0, 0, 1], v:[[1,0,1],[0,0,1],[0,1,1],[1,1,1]] },
+    { n:[ 0, 0,-1], v:[[0,0,0],[1,0,0],[1,1,0],[0,1,0]] },
+  ];
+  const verts = [];
+  const idx = [];
+  for (const f of faces) {
+    const base = verts.length / 6;
+    for (const p of f.v) verts.push(p[0],p[1],p[2], f.n[0],f.n[1],f.n[2]);
+    idx.push(base, base+1, base+2, base, base+2, base+3);
+  }
+  return { v: new Float32Array(verts), i: new Uint16Array(idx) };
+}
+const cube = buildCube();
+const cubeBuf = device.createBuffer({ size: cube.v.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+device.queue.writeBuffer(cubeBuf, 0, cube.v);
+const cubeIdxBuf = device.createBuffer({ size: cube.i.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
+device.queue.writeBuffer(cubeIdxBuf, 0, cube.i);
+const cubeIdxCount = cube.i.length;
+
+// ===========================================================================
+//  Sphere geometry: interleaved pos+normal, по ВЕРШИНЕ
+// ===========================================================================
+function makeSphere(slats, slons) {
+  const verts = [];
+  const idx = [];
+  for (let i = 0; i <= slats; i++) {
+    const th = i / slats * Math.PI, y = Math.cos(th), r = Math.sin(th);
+    for (let j = 0; j <= slons; j++) {
+      const ph = j / slons * 2 * Math.PI;
+      const x = r * Math.cos(ph), z = r * Math.sin(ph);
+      verts.push(x, y, z, x, y, z);
     }
+  }
+  for (let i = 0; i < slats; i++) for (let j = 0; j < slons; j++) {
+    const a = i * (slons + 1) + j, b = a + slons + 1;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  return { v: new Float32Array(verts), i: new Uint16Array(idx) };
+}
+const sphere = makeSphere(32, 48);
+const sphereBuf = device.createBuffer({ size: sphere.v.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+device.queue.writeBuffer(sphereBuf, 0, sphere.v);
+const sphereIdxBuf = device.createBuffer({ size: sphere.i.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
+device.queue.writeBuffer(sphereIdxBuf, 0, sphere.i);
+const sphereIdxCount = sphere.i.length;
 
-    function identityMatrix() {
-      return [
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-      ];
+// ===========================================================================
+//  Instances: ОТКАТ — пол плитками по клеткам, стены точными боксами (как раньше)
+// ===========================================================================
+const MAX_INSTANCES = 16000;
+const instBuf = device.createBuffer({ size: MAX_INSTANCES*48, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+const instData = new Float32Array(MAX_INSTANCES*12);
+let instCount = 0;
+function pushInst(px,py,pz,sx,sy,sz,r,g,b,a){
+  if (instCount >= MAX_INSTANCES) return;
+  const o = instCount*12;
+  instData[o]=px; instData[o+1]=py; instData[o+2]=pz; instData[o+3]=0;
+  instData[o+4]=sx; instData[o+5]=sy; instData[o+6]=sz; instData[o+7]=0;
+  instData[o+8]=r; instData[o+9]=g; instData[o+10]=b; instData[o+11]=a;
+  instCount++;
+}
+function buildInstances(worldX, worldZ){
+  instCount = 0;
+  const ccx = worldX / CELL, ccz = worldZ / CELL;
+  const x0 = Math.floor(ccx - VIEW_RADIUS), x1 = Math.ceil(ccx + VIEW_RADIUS);
+  const z0 = Math.floor(ccz - VIEW_RADIUS), z1 = Math.ceil(ccz + VIEW_RADIUS);
+  for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+    if (isSolid(x, z)) {
+      pushInst(x*CELL, 0, z*CELL, CELL, WALL_H, CELL, 0,0,0,0);
+    } else {
+      pushInst(x*CELL, -0.15, z*CELL, CELL, 0.15, CELL, 0,0,0,0);
     }
+  }
+}
 
-    function axisAngleMatrix(axis, angle) {
-      const x = axis.x;
-      const y = axis.y;
-      const z = axis.z;
+// ===========================================================================
+//  Uniforms / pipelines (MSAA x4)
+// ===========================================================================
+const uboData = new Float32Array(64);
+const ubo = device.createBuffer({ size: 256, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+const globalsBGL = device.createBindGroupLayout({
+  entries:[{ binding:0, visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT, buffer:{ type:"uniform" } }]
+});
+const globalsBG = device.createBindGroup({ layout:globalsBGL, entries:[{ binding:0, resource:{ buffer: ubo } }] });
 
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
-      const t = 1 - c;
+const vertexBufs = [
+  { arrayStride: 24, attributes: [
+    { shaderLocation:0, offset:0,  format:"float32x3" },
+    { shaderLocation:1, offset:12, format:"float32x3" }
+  ]},
+  { arrayStride: 48, stepMode:"instance", attributes: [
+    { shaderLocation:2, offset:0,  format:"float32x4" },
+    { shaderLocation:3, offset:16, format:"float32x4" },
+    { shaderLocation:4, offset:32, format:"float32x4" }
+  ]}
+];
+const mazePipeline = device.createRenderPipeline({
+  layout: device.createPipelineLayout({ bindGroupLayouts:[globalsBGL] }),
+  vertex: { module:shaderModule, entryPoint:"vs_maze", buffers: vertexBufs },
+  fragment: { module:shaderModule, entryPoint:"fs_main", targets:[{ format }] },
+  primitive: { topology:"triangle-list", cullMode:"none" },
+  multisample: { count: MSAA },
+  depthStencil: { depthWriteEnabled:true, depthCompare:"less", format:"depth24plus" }
+});
+const ballPipeline = device.createRenderPipeline({
+  layout: device.createPipelineLayout({ bindGroupLayouts:[globalsBGL] }),
+  vertex: { module:shaderModule, entryPoint:"vs_ball", buffers:[ vertexBufs[0] ] },
+  fragment: { module:shaderModule, entryPoint:"fs_main", targets:[{ format }] },
+  primitive: { topology:"triangle-list", cullMode:"none" },
+  multisample: { count: MSAA },
+  depthStencil: { depthWriteEnabled:true, depthCompare:"less", format:"depth24plus" }
+});
 
-      return [
-        [
-          t * x * x + c,
-          t * x * y - s * z,
-          t * x * z + s * y
-        ],
-        [
-          t * x * y + s * z,
-          t * y * y + c,
-          t * y * z - s * x
-        ],
-        [
-          t * x * z - s * y,
-          t * y * z + s * x,
-          t * z * z + c
-        ]
-      ];
+// ===========================================================================
+//  Camera matrices
+// ===========================================================================
+function buildViewProj(eye, target, aspect){
+  const f=norm3({x:target.x-eye.x, y:target.y-eye.y, z:target.z-eye.z});
+  const up={x:0,y:1,z:0};
+  const r=norm3(cross3(f,up));
+  const u=cross3(r,f);
+  const v=new Float32Array(16);
+  v[0]=r.x; v[1]=u.x; v[2]=-f.x; v[3]=0;
+  v[4]=r.y; v[5]=u.y; v[6]=-f.y; v[7]=0;
+  v[8]=r.z; v[9]=u.z; v[10]=-f.z; v[11]=0;
+  v[12]=-dot3(r,eye); v[13]=-dot3(u,eye); v[14]=dot3(f,eye); v[15]=1;
+  const fov=FOV_DEG*Math.PI/180, nf=1/Math.tan(fov/2), near=0.1, far=300;
+  const p=new Float32Array(16);
+  p[0]=nf/aspect; p[5]=nf;
+  p[10]=(far+near)/(near-far); p[11]=-1;
+  p[14]=2*far*near/(near-far);
+  return { v, p };
+}
+
+// ===========================================================================
+//  UI
+// ===========================================================================
+const overlay=document.getElementById("overlay");
+let overlayVisible=true, tapCount=0, tapTimer=null;
+function hideOverlay(){
+  overlayVisible=false;
+  overlay.classList.add("hidden");
+}
+overlay.addEventListener("click", ()=>{
+  let pr=Promise.resolve("granted");
+  if("DeviceMotionEvent" in window && typeof DeviceMotionEvent.requestPermission==="function")
+    pr=DeviceMotionEvent.requestPermission();
+  pr.then(res=>{
+    if((res==="granted"||res===undefined) && "DeviceMotionEvent" in window)
+      window.addEventListener("devicemotion", onMotion);
+    if(res==="granted") state.motionEnabled=true;
+    hideOverlay();
+  }).catch(()=>hideOverlay());
+});
+window.addEventListener("pointerdown", ()=>{
+  if(overlayVisible) return;
+  tapCount++;
+  if(tapTimer) clearTimeout(tapTimer);
+  tapTimer=setTimeout(()=>{
+    if(tapCount===2){ state.baseSet=false; state.samples=[]; }
+    else if(tapCount>=3){
+      const rx=Math.floor(ball.x/(CELL*2)), rz=Math.floor(ball.z/(CELL*2));
+      ball.x=(2*rx+1.5)*CELL; ball.z=(2*rz+1.5)*CELL;
+      ball.vx=0; ball.vz=0;
+      let tries=0;
+      while(collidesAt(ball.x,ball.z)&&tries++<40){ ball.x+=0.25; ball.z+=0.25; }
     }
+    tapCount=0;
+  },350);
+},{passive:true});
 
-    function matrixFromVectors(from, to) {
-      const f = normalizeVector(from);
-      const t = normalizeVector(to);
+// ===========================================================================
+//  Main loop
+// ===========================================================================
+let lastTime=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-lastTime)/1000);
+  lastTime=now;
+  if(!overlayVisible) stepBall(dt);
 
-      if (!f || !t) {
-        return identityMatrix();
-      }
+  const eye={ x:ball.x, y:BALL_R+CAM_HEIGHT, z:ball.z+CAM_BACK };
+  const target={ x:ball.x, y:BALL_R, z:ball.z };
+  const aspect=canvas.width/canvas.height;
+  const { v, p }=buildViewProj(eye,target,aspect);
 
-      const d = clamp(dotVec(f, t), -1, 1);
+  uboData.set(v,0);
+  uboData.set(p,16);
+  uboData[32]=eye.x; uboData[33]=eye.y; uboData[34]=eye.z; uboData[35]=0;
+  uboData[36]=ball.x; uboData[37]=BALL_R; uboData[38]=ball.z; uboData[39]=0;
+  uboData[40]=ballRot[0]; uboData[41]=ballRot[3]; uboData[42]=ballRot[6]; uboData[43]=0;
+  uboData[44]=ballRot[1]; uboData[45]=ballRot[4]; uboData[46]=ballRot[7]; uboData[47]=0;
+  uboData[48]=ballRot[2]; uboData[49]=ballRot[5]; uboData[50]=ballRot[8]; uboData[51]=0;
+  device.queue.writeBuffer(ubo,0,uboData);
 
-      if (d > 0.99999) {
-        return identityMatrix();
-      }
+  buildInstances(ball.x, ball.z);
+  device.queue.writeBuffer(instBuf,0,instData.subarray(0,instCount*12));
 
-      if (d < -0.99999) {
-        return axisAngleMatrix({ x: 1, y: 0, z: 0 }, Math.PI);
-      }
-
-      const axis = normalizeVector(crossVec(f, t));
-
-      if (!axis) {
-        return identityMatrix();
-      }
-
-      return axisAngleMatrix(axis, Math.acos(d));
+  const enc=device.createCommandEncoder();
+  const pass=enc.beginRenderPass({
+    colorAttachments:[{
+      view: msaaTex.createView(),
+      resolveTarget: context.getCurrentTexture().createView(),
+      clearValue:{ r:0.015, g:0.02, b:0.045, a:1 },
+      loadOp:"clear", storeOp:"discard"
+    }],
+    depthStencilAttachment:{
+      view:depthTex.createView(),
+      depthClearValue:1.0, depthLoadOp:"clear", depthStoreOp:"store"
     }
-
-    function applyMatrix(m, v) {
-      return {
-        x: m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
-        y: m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
-        z: m[2][0] * v.x + m[2][1] * v.y + m[2][2] * v.z
-      };
-    }
-
-    function makeBaseMatrix(baseNormalized) {
-      const targetZ = baseNormalized.z >= 0 ? 1 : -1;
-      state.baseTargetZ = targetZ;
-
-      return matrixFromVectors(
-        baseNormalized,
-        { x: 0, y: 0, z: targetZ }
-      );
-    }
-
-    function validXYZ(obj) {
-      return obj &&
-        Number.isFinite(obj.x) &&
-        Number.isFinite(obj.y) &&
-        Number.isFinite(obj.z);
-    }
-
-    function onMotion(event) {
-      if (!state.motionEnabled) return;
-
-      const g = event.accelerationIncludingGravity;
-
-      if (!validXYZ(g)) return;
-
-      if (!state.hasAccel) {
-        state.accel.x = g.x;
-        state.accel.y = g.y;
-        state.accel.z = g.z;
-        state.hasAccel = true;
-      } else {
-        state.accel.x += (g.x - state.accel.x) * SENSOR_FILTER;
-        state.accel.y += (g.y - state.accel.y) * SENSOR_FILTER;
-        state.accel.z += (g.z - state.accel.z) * SENSOR_FILTER;
-      }
-
-      if (!state.baseSet) {
-        state.samples.push({
-          x: state.accel.x,
-          y: state.accel.y,
-          z: state.accel.z
-        });
-
-        if (state.samples.length >= CALIBRATION_SAMPLES) {
-          let x = 0;
-          let y = 0;
-          let z = 0;
-
-          for (const sample of state.samples) {
-            x += sample.x;
-            y += sample.y;
-            z += sample.z;
-          }
-
-          const n = state.samples.length;
-
-          const avg = {
-            x: x / n,
-            y: y / n,
-            z: z / n
-          };
-
-          const normalized = normalizeVector(avg);
-
-          if (normalized) {
-            state.baseMatrix = makeBaseMatrix(normalized);
-            state.baseSet = true;
-          }
-
-          state.samples = [];
-        }
-      }
-    }
-
-    function getTiltAngles() {
-      if (!state.hasAccel || !state.baseSet || !state.baseMatrix) {
-        return { angleX: 0, angleY: 0 };
-      }
-
-      const current = normalizeVector(state.accel);
-
-      if (!current) {
-        return { angleX: 0, angleY: 0 };
-      }
-
-      const v = applyMatrix(state.baseMatrix, current);
-
-      let sx = -v.x * state.baseTargetZ;
-      let sy = v.y * state.baseTargetZ;
-
-      sx = clamp(sx, -1, 1);
-      sy = clamp(sy, -1, 1);
-
-      const angleX = Math.asin(sx) * 180 / Math.PI;
-      const angleY = Math.asin(sy) * 180 / Math.PI;
-
-      return { angleX, angleY };
-    }
-
-    function generateMaze(size) {
-      cols = size;
-      rows = size;
-
-      grid = Array.from({ length: rows }, () => Array(cols).fill("#"));
-
-      const stack = [];
-      const startX = 1;
-      const startY = 1;
-
-      grid[startY][startX] = ".";
-      stack.push([startX, startY]);
-
-      const visited = new Set();
-      visited.add(`${startX},${startY}`);
-
-      const dirs = [
-        [0, -2],
-        [0, 2],
-        [-2, 0],
-        [2, 0]
-      ];
-
-      while (stack.length > 0) {
-        const [cx, cy] = stack[stack.length - 1];
-        const neighbors = [];
-
-        for (const [dx, dy] of dirs) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-
-          if (
-            nx > 0 &&
-            nx < cols - 1 &&
-            ny > 0 &&
-            ny < rows - 1 &&
-            !visited.has(`${nx},${ny}`)
-          ) {
-            neighbors.push([nx, ny, dx, dy]);
-          }
-        }
-
-        if (neighbors.length === 0) {
-          stack.pop();
-        } else {
-          const [nx, ny, dx, dy] = neighbors[
-            Math.floor(Math.random() * neighbors.length)
-          ];
-
-          grid[cy + dy / 2][cx + dx / 2] = ".";
-          grid[ny][nx] = ".";
-          visited.add(`${nx},${ny}`);
-          stack.push([nx, ny]);
-        }
-      }
-
-      startCell = { x: 1, y: 1 };
-      exitCell = { x: cols - 2, y: rows - 2 };
-
-      grid[startCell.y][startCell.x] = "S";
-      grid[exitCell.y][exitCell.x] = "E";
-
-      layout();
-      resetBallToStart();
-      updateLevelIndicator();
-    }
-
-    function layout() {
-      vw = window.innerWidth;
-      vh = window.innerHeight;
-
-      cellSize = Math.min(vw, vh) / cols;
-      offsetX = (vw - cols * cellSize) / 2;
-      offsetY = (vh - rows * cellSize) / 2;
-
-      ball.radius = cellSize * 0.28;
-    }
-
-    function resetBallToStart() {
-      ball.x = offsetX + (startCell.x + 0.5) * cellSize;
-      ball.y = offsetY + (startCell.y + 0.5) * cellSize;
-      ball.vx = 0;
-      ball.vy = 0;
-    }
-
-    function updateLevelIndicator() {
-      levelIndicator.textContent = `Уровень ${currentLevel + 1}/${TOTAL_LEVELS}`;
-    }
-
-    function resizeCanvas() {
-      vw = window.innerWidth;
-      vh = window.innerHeight;
-      dpr = window.devicePixelRatio || 1;
-
-      canvas.width = Math.floor(vw * dpr);
-      canvas.height = Math.floor(vh * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      if (cols > 0) {
-        layout();
-      }
-    }
-
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-
-    function update(dt) {
-      const tilt = getTiltAngles();
-
-      let ax = tilt.angleX * ACCEL_FACTOR;
-      let ay = tilt.angleY * ACCEL_FACTOR;
-
-      const tiltMagnitude = Math.hypot(tilt.angleX, tilt.angleY);
-
-      if (tiltMagnitude < DEAD_ZONE_DEG) {
-        ax = 0;
-        ay = 0;
-      }
-
-      ball.vx += ax * dt;
-      ball.vy += ay * dt;
-
-      const damping = Math.exp(-FRICTION * dt);
-      ball.vx *= damping;
-      ball.vy *= damping;
-
-      let speed = Math.hypot(ball.vx, ball.vy);
-
-      if (speed > MAX_SPEED) {
-        const scale = MAX_SPEED / speed;
-        ball.vx *= scale;
-        ball.vy *= scale;
-        speed = MAX_SPEED;
-      }
-
-      ball.x += ball.vx * dt;
-      ball.y += ball.vy * dt;
-
-      collideWalls();
-      checkExit();
-    }
-
-    function collideWalls() {
-      const cellX = Math.floor((ball.x - offsetX) / cellSize);
-      const cellY = Math.floor((ball.y - offsetY) / cellSize);
-
-      for (let dy = -2; dy <= 2; dy++) {
-        for (let dx = -2; dx <= 2; dx++) {
-          const cx = cellX + dx;
-          const cy = cellY + dy;
-
-          if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) {
-            continue;
-          }
-
-          if (grid[cy][cx] !== "#") {
-            continue;
-          }
-
-          const rectX = offsetX + cx * cellSize;
-          const rectY = offsetY + cy * cellSize;
-
-          const nearestX = clamp(ball.x, rectX, rectX + cellSize);
-          const nearestY = clamp(ball.y, rectY, rectY + cellSize);
-
-          const dx2 = ball.x - nearestX;
-          const dy2 = ball.y - nearestY;
-
-          const distSq = dx2 * dx2 + dy2 * dy2;
-
-          if (distSq < ball.radius * ball.radius) {
-            const dist = Math.sqrt(distSq) || 0.0001;
-
-            const nx = dx2 / dist;
-            const ny = dy2 / dist;
-
-            const overlap = ball.radius - dist;
-
-            ball.x += nx * overlap;
-            ball.y += ny * overlap;
-
-            const dot = ball.vx * nx + ball.vy * ny;
-
-            if (dot < 0) {
-              ball.vx -= (1 + RESTITUTION) * dot * nx;
-              ball.vy -= (1 + RESTITUTION) * dot * ny;
-            }
-          }
-        }
-      }
-    }
-
-    function checkExit() {
-      const exitX = offsetX + (exitCell.x + 0.5) * cellSize;
-      const exitY = offsetY + (exitCell.y + 0.5) * cellSize;
-
-      const dx = ball.x - exitX;
-      const dy = ball.y - exitY;
-
-      const dist = Math.hypot(dx, dy);
-
-      if (dist < cellSize * 0.38) {
-        nextLevel();
-      }
-    }
-
-    function nextLevel() {
-      currentLevel++;
-
-      if (currentLevel >= TOTAL_LEVELS) {
-        showWinOverlay();
-        return;
-      }
-
-      generateMaze(LEVEL_SIZES[currentLevel]);
-    }
-
-    function showWinOverlay() {
-      overlayMode = "win";
-      overlayVisible = true;
-      overlay.textContent =
-        "Победа!\nВсе уровни пройдены.\nТапни, чтобы начать заново.";
-      overlay.classList.remove("hidden");
-      levelIndicator.classList.add("hidden");
-      hint.classList.add("hidden");
-    }
-
-    function hideOverlay() {
-      overlayVisible = false;
-      overlay.classList.add("hidden");
-      levelIndicator.classList.remove("hidden");
-      hint.classList.remove("hidden");
-    }
-
-    function startGame() {
-      currentLevel = 0;
-      generateMaze(LEVEL_SIZES[currentLevel]);
-      hideOverlay();
-    }
-
-    function restartLevel() {
-      resetBallToStart();
-    }
-
-    function calibrate() {
-      state.baseSet = false;
-      state.samples = [];
-    }
-
-    overlay.addEventListener("click", () => {
-      if (overlayMode === "start") {
-        let permissionPromise = Promise.resolve("granted");
-
-        if (
-          "DeviceMotionEvent" in window &&
-          typeof DeviceMotionEvent.requestPermission === "function"
-        ) {
-          permissionPromise = DeviceMotionEvent.requestPermission();
-        }
-
-        permissionPromise
-          .then((result) => {
-            if (result === "granted" || result === undefined) {
-              if ("DeviceMotionEvent" in window) {
-                window.addEventListener("devicemotion", onMotion);
-              }
-
-              state.motionEnabled = true;
-              startGame();
-            } else {
-              overlay.textContent = "Доступ к датчикам не разрешён.";
-            }
-          })
-          .catch((error) => {
-            const message = error && error.message ? error.message : String(error);
-            overlay.textContent = `Ошибка: ${message}`;
-          });
-      } else if (overlayMode === "win") {
-        startGame();
-      }
-    });
-
-    window.addEventListener(
-      "pointerdown",
-      () => {
-        if (overlayVisible) return;
-
-        tapCount++;
-
-        if (tapTimer) {
-          clearTimeout(tapTimer);
-        }
-
-        tapTimer = setTimeout(() => {
-          if (tapCount === 2) {
-            calibrate();
-          } else if (tapCount >= 3) {
-            restartLevel();
-          }
-
-          tapCount = 0;
-        }, 350);
-      },
-      { passive: true }
-    );
-
-    function draw() {
-      ctx.clearRect(0, 0, vw, vh);
-
-      // Пол.
-      ctx.fillStyle = "rgba(15, 23, 42, 0.65)";
-      ctx.fillRect(offsetX, offsetY, cols * cellSize, rows * cellSize);
-
-      // Выход.
-      const exitX = offsetX + (exitCell.x + 0.5) * cellSize;
-      const exitY = offsetY + (exitCell.y + 0.5) * cellSize;
-
-      const pulse = 0.85 + Math.sin(performance.now() / 300) * 0.15;
-
-      ctx.beginPath();
-      ctx.arc(exitX, exitY, cellSize * 0.3 * pulse, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(34, 197, 94, 0.85)";
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(exitX, exitY, cellSize * 0.38, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(34, 197, 94, 0.35)";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Стены.
-      ctx.fillStyle = "rgba(51, 65, 85, 0.95)";
-
-      for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < cols; x++) {
-          if (grid[y][x] === "#") {
-            const px = offsetX + x * cellSize;
-            const py = offsetY + y * cellSize;
-
-            ctx.fillRect(px, py, cellSize, cellSize);
-          }
-        }
-      }
-
-      // Шарик.
-      const gradient = ctx.createRadialGradient(
-        ball.x - ball.radius * 0.35,
-        ball.y - ball.radius * 0.35,
-        ball.radius * 0.1,
-        ball.x,
-        ball.y,
-        ball.radius
-      );
-
-      gradient.addColorStop(0, "#fb923c");
-      gradient.addColorStop(0.55, "#f97316");
-      gradient.addColorStop(1, "#7c2d12");
-
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      // Блик.
-      ctx.beginPath();
-      ctx.arc(
-        ball.x - ball.radius * 0.32,
-        ball.y - ball.radius * 0.34,
-        ball.radius * 0.18,
-        0,
-        Math.PI * 2
-      );
-      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
-      ctx.fill();
-    }
-
-    let lastTime = performance.now();
-
-    function frame(now) {
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
-      lastTime = now;
-
-      if (!overlayVisible) {
-        update(dt);
-      }
-
-      draw();
-      requestAnimationFrame(frame);
-    }
-
-    requestAnimationFrame(frame);
-  </script>
+  });
+
+  pass.setPipeline(mazePipeline);
+  pass.setBindGroup(0,globalsBG);
+  pass.setVertexBuffer(0,cubeBuf);
+  pass.setVertexBuffer(1,instBuf);
+  pass.setIndexBuffer(cubeIdxBuf,"uint16");
+  pass.drawIndexed(cubeIdxCount, instCount, 0, 0, 0);
+
+  pass.setPipeline(ballPipeline);
+  pass.setBindGroup(0,globalsBG);
+  pass.setVertexBuffer(0,sphereBuf);
+  pass.setIndexBuffer(sphereIdxBuf,"uint16");
+  pass.drawIndexed(sphereIdxCount, 1, 0, 0, 0);
+
+  pass.end();
+  device.queue.submit([enc.finish()]);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
 </body>
 </html>
