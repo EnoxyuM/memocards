@@ -14,13 +14,13 @@
     font-size:20px; line-height:1.4; cursor:pointer; backdrop-filter:blur(10px);
     white-space:pre-line; }
   #overlay.hidden { display:none; }
-  #hud { position:fixed; top:18px; left:18px; z-index:20;
+  #hud { position:fixed; top:18px; left:18px; z-index:60;
     color:#e2e8f0; font-size:26px; font-weight:700; letter-spacing:1px;
     text-shadow: 0 0 10px rgba(140,90,255,.9), 0 0 20px rgba(80,40,180,.6);
     pointer-events:none; font-variant-numeric: tabular-nums;
     opacity:0; transition: opacity 0.3s ease; }
   #hud.low { color:#ff8090; text-shadow: 0 0 10px rgba(255,80,120,.9); }
-  #fps { position:fixed; top:18px; right:18px; z-index:20;
+  #fps { position:fixed; top:18px; right:18px; z-index:60;
     color:#a0c8ff; font-size:15px; font-weight:600;
     text-shadow: 0 0 8px rgba(60,120,255,.7); pointer-events:none;
     font-variant-numeric: tabular-nums; opacity:.8; }
@@ -110,6 +110,10 @@ const WALL_TEX_SIZE = 64;
 const WALL_TEX_HALF = WALL_TEX_SIZE / 2;
 const MAX_PARTICLES = 512;
 
+// Радиусы безопасной стартовой зоны (в квадрате, чтобы не считать корень)
+const SPAWN_CLEAR_RADIUS_SQ = 12.25; // 3.5 клетки — убирает все стены
+const SPAWN_MINE_SAFE_RADIUS_SQ = 25; // 5 клеток — убирает все мины
+
 // ===========================================================================
 //  Game state
 // ===========================================================================
@@ -156,7 +160,11 @@ function smoothstep(a, b, x) {
 //  Wall & mine generation
 // ===========================================================================
 function isSolidRaw(x, z) {
-  if (x === SPAWN_CELL_X && z === SPAWN_CELL_Z) return false;
+  // Безопасная стартовая зона — убираем стены в радиусе 3.5 клетки
+  const sdx = x - SPAWN_CELL_X;
+  const sdz = z - SPAWN_CELL_Z;
+  if (sdx * sdx + sdz * sdz <= SPAWN_CLEAR_RADIUS_SQ) return false;
+
   const cluster = valueNoise2D(x * 0.13, z * 0.13);
   const prob = 0.02 + smoothstep(0.28, 0.85, cluster) * 0.85;
   const r = (hashSeed(x, z, (SEED ^ 0xF00D) >>> 0) & 0xFFFF) / 65535;
@@ -167,6 +175,11 @@ function isSolidWithDestroyed(x, z) {
   return isSolidRaw(x, z);
 }
 function hasMineRaw(x, z) {
+  // Безопасная стартовая зона — никаких мин в радиусе 5 клеток
+  const sdx = x - SPAWN_CELL_X;
+  const sdz = z - SPAWN_CELL_Z;
+  if (sdx * sdx + sdz * sdz <= SPAWN_MINE_SAFE_RADIUS_SQ) return false;
+
   if (!isSolidRaw(x, z)) return false;
   const cluster = valueNoise2D(x * 0.1 + 200, z * 0.1 + 200);
   if (cluster < 0.3) return false;
@@ -194,7 +207,7 @@ function tileNumber(x, z) {
 // ===========================================================================
 //  Particle system
 // ===========================================================================
-const particles = [];  // { x,y,z, vx,vy,vz, size, r,g,b, life, maxLife }
+const particles = [];
 
 function spawnParticle(x, y, z, vx, vy, vz, size, r, g, b, life) {
   if (particles.length >= MAX_PARTICLES) return;
@@ -206,7 +219,6 @@ function spawnBreakParticles(wx, wz, isMine) {
   const cz = (wz + 0.5) * CELL;
 
   if (isMine) {
-    // ---- Explosion debris (orange chunks) ----
     for (let i = 0; i < 36; i++) {
       const ang = Math.random() * Math.PI * 2;
       const spd = 2 + Math.random() * 7;
@@ -221,7 +233,6 @@ function spawnBreakParticles(wx, wz, isMine) {
         0.5 + Math.random() * 0.7
       );
     }
-    // ---- Bright sparks ----
     for (let i = 0; i < 24; i++) {
       const ang = Math.random() * Math.PI * 2;
       const spd = 5 + Math.random() * 12;
@@ -234,7 +245,6 @@ function spawnBreakParticles(wx, wz, isMine) {
         0.4 + Math.random() * 0.5
       );
     }
-    // ---- Dark smoke puffs ----
     for (let i = 0; i < 12; i++) {
       const ang = Math.random() * Math.PI * 2;
       const spd = 0.5 + Math.random() * 2;
@@ -249,7 +259,6 @@ function spawnBreakParticles(wx, wz, isMine) {
       );
     }
   } else {
-    // ---- Stone chunks ----
     for (let i = 0; i < 16; i++) {
       const ang = Math.random() * Math.PI * 2;
       const spd = 1 + Math.random() * 4;
@@ -264,7 +273,6 @@ function spawnBreakParticles(wx, wz, isMine) {
         0.6 + Math.random() * 0.5
       );
     }
-    // ---- Dust puffs ----
     for (let i = 0; i < 8; i++) {
       const ang = Math.random() * Math.PI * 2;
       const spd = 0.3 + Math.random() * 1.5;
@@ -472,17 +480,23 @@ const keys={};
 window.addEventListener("keydown", e=>{ keys[e.code]=true; });
 window.addEventListener("keyup",   e=>{ keys[e.code]=false; });
 
+function limitTiltMag(tx, ty) {
+  const m = Math.hypot(tx, ty);
+  if (m > MAX_TILT_DEG) {
+    const s = MAX_TILT_DEG / m;
+    return { tx: tx * s, ty: ty * s };
+  }
+  return { tx, ty };
+}
+
 function currentTilt(){
   if(sensorState.motionEnabled && sensorState.baseSet){
     const s=sensorTilt();
     if(s){
-      let tx = s.tx / Math.max(sensX, 0.1) * MAX_TILT_DEG;
-      let ty = s.ty / Math.max(sensY, 0.1) * MAX_TILT_DEG;
-      const cap = MAX_TILT_DEG * 1.6;
-      tx = clamp(tx, -cap, cap);
-      ty = clamp(ty, -cap, cap);
+      const tx = s.tx / Math.max(sensX, 0.1) * MAX_TILT_DEG;
+      const ty = s.ty / Math.max(sensY, 0.1) * MAX_TILT_DEG;
       if (Math.hypot(tx, ty) < 0.7) return {tx:0, ty:0};
-      return {tx, ty};
+      return limitTiltMag(tx, ty);
     }
   }
   let mx=mouse.active?mouse.x:0, my=mouse.active?mouse.y:0;
@@ -491,7 +505,9 @@ function currentTilt(){
   if(keys.KeyW||keys.ArrowUp)    my-=1;
   if(keys.KeyS||keys.ArrowDown)  my+=1;
   mx=clamp(mx,-1,1); my=clamp(my,-1,1);
-  if(Math.hypot(mx,my)<DEAD_ZONE) return {tx:0,ty:0};
+  const mag = Math.hypot(mx, my);
+  if(mag < DEAD_ZONE) return {tx:0,ty:0};
+  if(mag > 1){ mx /= mag; my /= mag; }
   return { tx: mx*MAX_TILT_DEG, ty: my*MAX_TILT_DEG };
 }
 
@@ -646,7 +662,7 @@ fn vs_particle(
   let w = ip.xyz + cp * is.xyz;
   o.wpos = w;
   o.nrm  = cn;
-  o.matW = ic;            // rgb + alpha(life)
+  o.matW = ic;
   o.local = cp;
   o.kind = 2.0;
   o.isz  = is.xyz;
@@ -828,7 +844,6 @@ fn fs_main(i : VOut) -> @location(0) vec4<f32> {
   var glow : vec3<f32> = vec3<f32>(0.0);
 
   if (i.kind > 1.5) {
-    // ---------- PARTICLE ----------
     let t = i.matW.a;
     let c = i.matW.rgb;
     let n = normalize(i.nrm);
@@ -837,7 +852,6 @@ fn fs_main(i : VOut) -> @location(0) vec4<f32> {
     pc = mix(vec3<f32>(0.0), pc, fogF);
     return vec4<f32>(pc, t);
   } else if (i.kind > 0.5) {
-    // ---------- BALL ----------
     let Rm = mat3x3<f32>(G.rot0, G.rot1, G.rot2);
     let a = vec3<f32>(11.0, 7.0, 13.0);
     let g1 = cos(dot(i.local, a)) * a;
@@ -875,7 +889,6 @@ fn fs_main(i : VOut) -> @location(0) vec4<f32> {
     let sparkN = fbm2(i.local * 7.0 + Rm[0] * 4.0);
     col += vec3<f32>(0.9, 0.75, 1.0) * smoothstep(0.78, 0.96, sparkN) * rim * 0.6;
   } else {
-    // ---------- WALLS / FLOOR ----------
     let faceN = normalize(i.nrm);
     let matType = i.matW.x;
     let rnd  = i.matW.y;
@@ -1307,7 +1320,6 @@ function frame(now){
 
   updateWallTex(ball.x, ball.z);
 
-  // Camera with shake
   const sX = shake > 0 ? (Math.random() - 0.5) * shake : 0;
   const sZ = shake > 0 ? (Math.random() - 0.5) * shake : 0;
   const eye={ x:ball.x + sX, y:BALL_R+CAM_HEIGHT, z:ball.z+CAM_BACK + sZ };
