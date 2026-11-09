@@ -139,8 +139,20 @@
 
     <div class="row">
       <span>Max zone</span>
-      <input id="maxZone" type="range" min="5" max="90" step="1" value="20" />
-      <output id="maxZoneOut">20°</output>
+      <input id="maxZone" type="range" min="3" max="90" step="1" value="10" />
+      <output id="maxZoneOut">10°</output>
+    </div>
+
+    <div class="row">
+      <span>Sens X</span>
+      <input id="sensX" type="range" min="0.1" max="5" step="0.1" value="1" />
+      <output id="sensXOut">1.0</output>
+    </div>
+
+    <div class="row">
+      <span>Sens Y</span>
+      <input id="sensY" type="range" min="0.1" max="5" step="0.1" value="1" />
+      <output id="sensYOut">1.0</output>
     </div>
 
     <div class="row">
@@ -158,7 +170,9 @@
 
     const settings = {
       deadZone: 2,
-      maxZone: 20,
+      maxZone: 10,
+      sensX: 1,
+      sensY: 1,
       maxSpeed: 1000
     };
 
@@ -358,7 +372,7 @@
       }
     }
 
-    // Возвращает вектор направления (единичный или нулевой) и скорость в px/s.
+    // Возвращает вектор скорости в px/s.
     function getMoveVector() {
       if (!state.hasAccel || !state.baseSet || !state.baseMatrix) {
         return { vx: 0, vy: 0, magnitude: 0 };
@@ -378,8 +392,12 @@
       sx = clamp(sx, -1, 1);
       sy = clamp(sy, -1, 1);
 
-      const angleX = Math.asin(sx) * 180 / Math.PI;
-      const angleY = Math.asin(sy) * 180 / Math.PI;
+      let angleX = Math.asin(sx) * 180 / Math.PI;
+      let angleY = Math.asin(sy) * 180 / Math.PI;
+
+      // Умножаем на множители чувствительности по осям.
+      angleX *= settings.sensX;
+      angleY *= settings.sensY;
 
       const magnitude = Math.hypot(angleX, angleY);
 
@@ -398,7 +416,6 @@
 
       const speed = curve * settings.maxSpeed;
 
-      // Единичное направление в плоскости.
       let dirX, dirY;
       if (magnitude < 0.0001) {
         dirX = 0;
@@ -415,7 +432,6 @@
       };
     }
 
-    // Целевые значения скорости, чтобы движение было плавным.
     const targetVelocity = { x: 0, y: 0 };
     const velocity = { x: 0, y: 0 };
 
@@ -433,7 +449,6 @@
       velocity.x += (targetVelocity.x - velocity.x) * CURSOR_SMOOTHING;
       velocity.y += (targetVelocity.y - velocity.y) * CURSOR_SMOOTHING;
 
-      // Если скорость очень маленькая — обнуляем, чтобы не было "дрейфа".
       if (Math.abs(velocity.x) < 0.5 && Math.abs(targetVelocity.x) === 0) {
         velocity.x = 0;
       }
@@ -490,6 +505,8 @@
 
     bindSlider("deadZone", "deadZoneOut", "deadZone", (v) => `${v.toFixed(1)}°`);
     bindSlider("maxZone", "maxZoneOut", "maxZone", (v) => `${Math.round(v)}°`);
+    bindSlider("sensX", "sensXOut", "sensX", (v) => v.toFixed(1));
+    bindSlider("sensY", "sensYOut", "sensY", (v) => v.toFixed(1));
     bindSlider("maxSpeed", "maxSpeedOut", "maxSpeed", (v) => `${Math.round(v)}`);
 
     overlay.addEventListener("click", () => {
