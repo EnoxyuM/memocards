@@ -6,7 +6,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
   />
-  <title>Курсор наклоном</title>
+  <title>Лабиринт наклоном</title>
   <style>
     html,
     body {
@@ -20,9 +20,14 @@
     }
 
     body {
-      cursor: none;
       user-select: none;
       -webkit-user-select: none;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
     }
 
     #overlay {
@@ -34,154 +39,105 @@
       padding: 20px;
       text-align: center;
       color: #e2e8f0;
-      background: rgba(2, 6, 23, 0.72);
-      font-size: 19px;
-      line-height: 1.35;
+      background: rgba(2, 6, 23, 0.78);
+      font-size: 20px;
+      line-height: 1.4;
       cursor: pointer;
-      backdrop-filter: blur(8px);
+      backdrop-filter: blur(10px);
+      white-space: pre-line;
     }
 
     #overlay.hidden {
       display: none;
     }
 
-    #cursor {
+    #levelIndicator {
       position: fixed;
-      left: 0;
-      top: 0;
-      z-index: 40;
+      top: max(10px, env(safe-area-inset-top));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      background: rgba(2, 6, 23, 0.35);
+      color: rgba(226, 232, 240, 0.9);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      backdrop-filter: blur(8px);
       pointer-events: none;
-      will-change: transform;
     }
 
-    #cursor .ring {
-      position: absolute;
-      left: -15px;
-      top: -15px;
-      width: 30px;
-      height: 30px;
-      border: 2px solid rgba(255, 255, 255, 0.92);
-      border-radius: 50%;
-      box-shadow:
-        0 0 12px rgba(0, 0, 0, 0.45),
-        inset 0 0 8px rgba(255, 255, 255, 0.12);
-    }
-
-    #cursor .dot {
-      position: absolute;
-      left: -2.5px;
-      top: -2.5px;
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: #ffffff;
-      box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
-    }
-
-    #controls {
+    #hint {
       position: fixed;
-      left: 10px;
-      right: 10px;
-      bottom: max(10px, env(safe-area-inset-bottom));
-      z-index: 20;
-      display: grid;
-      gap: 7px;
-      padding: 9px 11px;
-      border: 1px solid rgba(148, 163, 184, 0.18);
-      border-radius: 16px;
-      background: rgba(2, 6, 23, 0.34);
-      backdrop-filter: blur(12px);
-      color: #e2e8f0;
-      cursor: auto;
-    }
-
-    .row {
-      display: grid;
-      grid-template-columns: 72px 1fr 54px;
-      align-items: center;
-      gap: 9px;
-      font-size: 12px;
-    }
-
-    .row span {
-      color: #cbd5e1;
-    }
-
-    .row output {
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-      color: #93c5fd;
-      font-weight: 700;
-    }
-
-    input[type="range"] {
-      width: 100%;
-      accent-color: #60a5fa;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      color: rgba(148, 163, 184, 0.6);
+      font-size: 11px;
+      text-align: center;
+      pointer-events: none;
+      line-height: 1.35;
+      white-space: pre-line;
     }
   </style>
 </head>
 <body>
   <div id="overlay">
-    Нажми, чтобы включить управление наклоном
+    Нажми, чтобы включить
+    управление наклоном
   </div>
 
-  <div id="cursor">
-    <div class="ring"></div>
-    <div class="dot"></div>
-  </div>
+  <div id="levelIndicator" class="hidden">Уровень 1/5</div>
+  <div id="hint" class="hidden">2 тапа — калибровка · 3 тапа — рестарт</div>
 
-  <div id="controls">
-    <div class="row">
-      <span>Dead zone</span>
-      <input id="deadZone" type="range" min="0" max="20" step="0.5" value="2" />
-      <output id="deadZoneOut">2.0°</output>
-    </div>
-
-    <div class="row">
-      <span>Max zone</span>
-      <input id="maxZone" type="range" min="3" max="90" step="1" value="10" />
-      <output id="maxZoneOut">10°</output>
-    </div>
-
-    <div class="row">
-      <span>Sens X</span>
-      <input id="sensX" type="range" min="0.1" max="5" step="0.1" value="1" />
-      <output id="sensXOut">1.0</output>
-    </div>
-
-    <div class="row">
-      <span>Sens Y</span>
-      <input id="sensY" type="range" min="0.1" max="5" step="0.1" value="1" />
-      <output id="sensYOut">1.0</output>
-    </div>
-
-    <div class="row">
-      <span>Max speed</span>
-      <input id="maxSpeed" type="range" min="100" max="3000" step="50" value="1000" />
-      <output id="maxSpeedOut">1000</output>
-    </div>
-  </div>
+  <canvas id="canvas"></canvas>
 
   <script>
     "use strict";
 
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
     const overlay = document.getElementById("overlay");
-    const cursorEl = document.getElementById("cursor");
+    const levelIndicator = document.getElementById("levelIndicator");
+    const hint = document.getElementById("hint");
 
-    const settings = {
-      deadZone: 2,
-      maxZone: 10,
-      sensX: 1.6,
-      sensY: 1,
-      maxSpeed: 1000
-    };
+    const LEVEL_SIZES = [7, 9, 11, 13, 15];
+    const TOTAL_LEVELS = LEVEL_SIZES.length;
+
+    const SENSOR_FILTER = 0.16;
+    const CALIBRATION_SAMPLES = 25;
+    const ACCEL_FACTOR = 90;
+    const DEAD_ZONE_DEG = 0.6;
+    const FRICTION = 2.6;
+    const RESTITUTION = 0.28;
+    const MAX_SPEED = 1300;
 
     let vw = window.innerWidth;
     let vh = window.innerHeight;
+    let dpr = window.devicePixelRatio || 1;
 
-    const pos = {
-      x: vw / 2,
-      y: vh / 2
+    let currentLevel = 0;
+    let overlayMode = "start";
+    let overlayVisible = true;
+
+    let cols = 0;
+    let rows = 0;
+    let cellSize = 0;
+    let offsetX = 0;
+    let offsetY = 0;
+    let grid = [];
+    let startCell = { x: 1, y: 1 };
+    let exitCell = { x: 1, y: 1 };
+
+    const ball = {
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      radius: 10
     };
 
     const state = {
@@ -194,9 +150,8 @@
       baseTargetZ: 1
     };
 
-    const SENSOR_FILTER = 0.16;
-    const CALIBRATION_SAMPLES = 25;
-    const CURSOR_SMOOTHING = 0.18;
+    let tapCount = 0;
+    let tapTimer = null;
 
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
@@ -372,16 +327,15 @@
       }
     }
 
-    // Возвращает вектор скорости в px/s.
-    function getMoveVector() {
+    function getTiltAngles() {
       if (!state.hasAccel || !state.baseSet || !state.baseMatrix) {
-        return { vx: 0, vy: 0, magnitude: 0 };
+        return { angleX: 0, angleY: 0 };
       }
 
       const current = normalizeVector(state.accel);
 
       if (!current) {
-        return { vx: 0, vy: 0, magnitude: 0 };
+        return { angleX: 0, angleY: 0 };
       }
 
       const v = applyMatrix(state.baseMatrix, current);
@@ -392,48 +346,393 @@
       sx = clamp(sx, -1, 1);
       sy = clamp(sy, -1, 1);
 
-      let angleX = Math.asin(sx) * 180 / Math.PI;
-      let angleY = Math.asin(sy) * 180 / Math.PI;
+      const angleX = Math.asin(sx) * 180 / Math.PI;
+      const angleY = Math.asin(sy) * 180 / Math.PI;
 
-      // Умножаем на множители чувствительности по осям.
-      angleX *= settings.sensX;
-      angleY *= settings.sensY;
-
-      const magnitude = Math.hypot(angleX, angleY);
-
-      if (magnitude <= settings.deadZone) {
-        return { vx: 0, vy: 0, magnitude };
-      }
-
-      const deadZone = settings.deadZone;
-      const maxZone = Math.max(deadZone + 0.1, settings.maxZone);
-
-      let t = (magnitude - deadZone) / (maxZone - deadZone);
-      t = clamp(t, 0, 1);
-
-      // Небольшая нелинейность: чем сильнее наклон, тем резче рост скорости.
-      const curve = t * t;
-
-      const speed = curve * settings.maxSpeed;
-
-      let dirX, dirY;
-      if (magnitude < 0.0001) {
-        dirX = 0;
-        dirY = 0;
-      } else {
-        dirX = angleX / magnitude;
-        dirY = angleY / magnitude;
-      }
-
-      return {
-        vx: dirX * speed,
-        vy: dirY * speed,
-        magnitude
-      };
+      return { angleX, angleY };
     }
 
-    const targetVelocity = { x: 0, y: 0 };
-    const velocity = { x: 0, y: 0 };
+    function generateMaze(size) {
+      cols = size;
+      rows = size;
+
+      grid = Array.from({ length: rows }, () => Array(cols).fill("#"));
+
+      const stack = [];
+      const startX = 1;
+      const startY = 1;
+
+      grid[startY][startX] = ".";
+      stack.push([startX, startY]);
+
+      const visited = new Set();
+      visited.add(`${startX},${startY}`);
+
+      const dirs = [
+        [0, -2],
+        [0, 2],
+        [-2, 0],
+        [2, 0]
+      ];
+
+      while (stack.length > 0) {
+        const [cx, cy] = stack[stack.length - 1];
+        const neighbors = [];
+
+        for (const [dx, dy] of dirs) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+
+          if (
+            nx > 0 &&
+            nx < cols - 1 &&
+            ny > 0 &&
+            ny < rows - 1 &&
+            !visited.has(`${nx},${ny}`)
+          ) {
+            neighbors.push([nx, ny, dx, dy]);
+          }
+        }
+
+        if (neighbors.length === 0) {
+          stack.pop();
+        } else {
+          const [nx, ny, dx, dy] = neighbors[
+            Math.floor(Math.random() * neighbors.length)
+          ];
+
+          grid[cy + dy / 2][cx + dx / 2] = ".";
+          grid[ny][nx] = ".";
+          visited.add(`${nx},${ny}`);
+          stack.push([nx, ny]);
+        }
+      }
+
+      startCell = { x: 1, y: 1 };
+      exitCell = { x: cols - 2, y: rows - 2 };
+
+      grid[startCell.y][startCell.x] = "S";
+      grid[exitCell.y][exitCell.x] = "E";
+
+      layout();
+      resetBallToStart();
+      updateLevelIndicator();
+    }
+
+    function layout() {
+      vw = window.innerWidth;
+      vh = window.innerHeight;
+
+      cellSize = Math.min(vw, vh) / cols;
+      offsetX = (vw - cols * cellSize) / 2;
+      offsetY = (vh - rows * cellSize) / 2;
+
+      ball.radius = cellSize * 0.28;
+    }
+
+    function resetBallToStart() {
+      ball.x = offsetX + (startCell.x + 0.5) * cellSize;
+      ball.y = offsetY + (startCell.y + 0.5) * cellSize;
+      ball.vx = 0;
+      ball.vy = 0;
+    }
+
+    function updateLevelIndicator() {
+      levelIndicator.textContent = `Уровень ${currentLevel + 1}/${TOTAL_LEVELS}`;
+    }
+
+    function resizeCanvas() {
+      vw = window.innerWidth;
+      vh = window.innerHeight;
+      dpr = window.devicePixelRatio || 1;
+
+      canvas.width = Math.floor(vw * dpr);
+      canvas.height = Math.floor(vh * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      if (cols > 0) {
+        layout();
+      }
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    function update(dt) {
+      const tilt = getTiltAngles();
+
+      let ax = tilt.angleX * ACCEL_FACTOR;
+      let ay = tilt.angleY * ACCEL_FACTOR;
+
+      const tiltMagnitude = Math.hypot(tilt.angleX, tilt.angleY);
+
+      if (tiltMagnitude < DEAD_ZONE_DEG) {
+        ax = 0;
+        ay = 0;
+      }
+
+      ball.vx += ax * dt;
+      ball.vy += ay * dt;
+
+      const damping = Math.exp(-FRICTION * dt);
+      ball.vx *= damping;
+      ball.vy *= damping;
+
+      let speed = Math.hypot(ball.vx, ball.vy);
+
+      if (speed > MAX_SPEED) {
+        const scale = MAX_SPEED / speed;
+        ball.vx *= scale;
+        ball.vy *= scale;
+        speed = MAX_SPEED;
+      }
+
+      ball.x += ball.vx * dt;
+      ball.y += ball.vy * dt;
+
+      collideWalls();
+      checkExit();
+    }
+
+    function collideWalls() {
+      const cellX = Math.floor((ball.x - offsetX) / cellSize);
+      const cellY = Math.floor((ball.y - offsetY) / cellSize);
+
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const cx = cellX + dx;
+          const cy = cellY + dy;
+
+          if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) {
+            continue;
+          }
+
+          if (grid[cy][cx] !== "#") {
+            continue;
+          }
+
+          const rectX = offsetX + cx * cellSize;
+          const rectY = offsetY + cy * cellSize;
+
+          const nearestX = clamp(ball.x, rectX, rectX + cellSize);
+          const nearestY = clamp(ball.y, rectY, rectY + cellSize);
+
+          const dx2 = ball.x - nearestX;
+          const dy2 = ball.y - nearestY;
+
+          const distSq = dx2 * dx2 + dy2 * dy2;
+
+          if (distSq < ball.radius * ball.radius) {
+            const dist = Math.sqrt(distSq) || 0.0001;
+
+            const nx = dx2 / dist;
+            const ny = dy2 / dist;
+
+            const overlap = ball.radius - dist;
+
+            ball.x += nx * overlap;
+            ball.y += ny * overlap;
+
+            const dot = ball.vx * nx + ball.vy * ny;
+
+            if (dot < 0) {
+              ball.vx -= (1 + RESTITUTION) * dot * nx;
+              ball.vy -= (1 + RESTITUTION) * dot * ny;
+            }
+          }
+        }
+      }
+    }
+
+    function checkExit() {
+      const exitX = offsetX + (exitCell.x + 0.5) * cellSize;
+      const exitY = offsetY + (exitCell.y + 0.5) * cellSize;
+
+      const dx = ball.x - exitX;
+      const dy = ball.y - exitY;
+
+      const dist = Math.hypot(dx, dy);
+
+      if (dist < cellSize * 0.38) {
+        nextLevel();
+      }
+    }
+
+    function nextLevel() {
+      currentLevel++;
+
+      if (currentLevel >= TOTAL_LEVELS) {
+        showWinOverlay();
+        return;
+      }
+
+      generateMaze(LEVEL_SIZES[currentLevel]);
+    }
+
+    function showWinOverlay() {
+      overlayMode = "win";
+      overlayVisible = true;
+      overlay.textContent =
+        "Победа!\nВсе уровни пройдены.\nТапни, чтобы начать заново.";
+      overlay.classList.remove("hidden");
+      levelIndicator.classList.add("hidden");
+      hint.classList.add("hidden");
+    }
+
+    function hideOverlay() {
+      overlayVisible = false;
+      overlay.classList.add("hidden");
+      levelIndicator.classList.remove("hidden");
+      hint.classList.remove("hidden");
+    }
+
+    function startGame() {
+      currentLevel = 0;
+      generateMaze(LEVEL_SIZES[currentLevel]);
+      hideOverlay();
+    }
+
+    function restartLevel() {
+      resetBallToStart();
+    }
+
+    function calibrate() {
+      state.baseSet = false;
+      state.samples = [];
+    }
+
+    overlay.addEventListener("click", () => {
+      if (overlayMode === "start") {
+        let permissionPromise = Promise.resolve("granted");
+
+        if (
+          "DeviceMotionEvent" in window &&
+          typeof DeviceMotionEvent.requestPermission === "function"
+        ) {
+          permissionPromise = DeviceMotionEvent.requestPermission();
+        }
+
+        permissionPromise
+          .then((result) => {
+            if (result === "granted" || result === undefined) {
+              if ("DeviceMotionEvent" in window) {
+                window.addEventListener("devicemotion", onMotion);
+              }
+
+              state.motionEnabled = true;
+              startGame();
+            } else {
+              overlay.textContent = "Доступ к датчикам не разрешён.";
+            }
+          })
+          .catch((error) => {
+            const message = error && error.message ? error.message : String(error);
+            overlay.textContent = `Ошибка: ${message}`;
+          });
+      } else if (overlayMode === "win") {
+        startGame();
+      }
+    });
+
+    window.addEventListener(
+      "pointerdown",
+      () => {
+        if (overlayVisible) return;
+
+        tapCount++;
+
+        if (tapTimer) {
+          clearTimeout(tapTimer);
+        }
+
+        tapTimer = setTimeout(() => {
+          if (tapCount === 2) {
+            calibrate();
+          } else if (tapCount >= 3) {
+            restartLevel();
+          }
+
+          tapCount = 0;
+        }, 350);
+      },
+      { passive: true }
+    );
+
+    function draw() {
+      ctx.clearRect(0, 0, vw, vh);
+
+      // Пол.
+      ctx.fillStyle = "rgba(15, 23, 42, 0.65)";
+      ctx.fillRect(offsetX, offsetY, cols * cellSize, rows * cellSize);
+
+      // Выход.
+      const exitX = offsetX + (exitCell.x + 0.5) * cellSize;
+      const exitY = offsetY + (exitCell.y + 0.5) * cellSize;
+
+      const pulse = 0.85 + Math.sin(performance.now() / 300) * 0.15;
+
+      ctx.beginPath();
+      ctx.arc(exitX, exitY, cellSize * 0.3 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(34, 197, 94, 0.85)";
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(exitX, exitY, cellSize * 0.38, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(34, 197, 94, 0.35)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Стены.
+      ctx.fillStyle = "rgba(51, 65, 85, 0.95)";
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          if (grid[y][x] === "#") {
+            const px = offsetX + x * cellSize;
+            const py = offsetY + y * cellSize;
+
+            ctx.fillRect(px, py, cellSize, cellSize);
+          }
+        }
+      }
+
+      // Шарик.
+      const gradient = ctx.createRadialGradient(
+        ball.x - ball.radius * 0.35,
+        ball.y - ball.radius * 0.35,
+        ball.radius * 0.1,
+        ball.x,
+        ball.y,
+        ball.radius
+      );
+
+      gradient.addColorStop(0, "#fb923c");
+      gradient.addColorStop(0.55, "#f97316");
+      gradient.addColorStop(1, "#7c2d12");
+
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Блик.
+      ctx.beginPath();
+      ctx.arc(
+        ball.x - ball.radius * 0.32,
+        ball.y - ball.radius * 0.34,
+        ball.radius * 0.18,
+        0,
+        Math.PI * 2
+      );
+      ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+      ctx.fill();
+    }
 
     let lastTime = performance.now();
 
@@ -441,124 +740,13 @@
       const dt = Math.min(0.05, (now - lastTime) / 1000);
       lastTime = now;
 
-      const move = getMoveVector();
-
-      targetVelocity.x = move.vx;
-      targetVelocity.y = move.vy;
-
-      velocity.x += (targetVelocity.x - velocity.x) * CURSOR_SMOOTHING;
-      velocity.y += (targetVelocity.y - velocity.y) * CURSOR_SMOOTHING;
-
-      if (Math.abs(velocity.x) < 0.5 && Math.abs(targetVelocity.x) === 0) {
-        velocity.x = 0;
-      }
-      if (Math.abs(velocity.y) < 0.5 && Math.abs(targetVelocity.y) === 0) {
-        velocity.y = 0;
+      if (!overlayVisible) {
+        update(dt);
       }
 
-      pos.x += velocity.x * dt;
-      pos.y += velocity.y * dt;
-
-      const r = 15;
-
-      if (pos.x < r) {
-        pos.x = r;
-        if (velocity.x < 0) velocity.x = -velocity.x * 0.2;
-      } else if (pos.x > vw - r) {
-        pos.x = vw - r;
-        if (velocity.x > 0) velocity.x = -velocity.x * 0.2;
-      }
-
-      if (pos.y < r) {
-        pos.y = r;
-        if (velocity.y < 0) velocity.y = -velocity.y * 0.2;
-      } else if (pos.y > vh - r) {
-        pos.y = vh - r;
-        if (velocity.y > 0) velocity.y = -velocity.y * 0.2;
-      }
-
-      cursorEl.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`;
-
+      draw();
       requestAnimationFrame(frame);
     }
-
-    function resize() {
-      vw = window.innerWidth;
-      vh = window.innerHeight;
-    }
-
-    window.addEventListener("resize", resize);
-    resize();
-
-    function bindSlider(inputId, outputId, key, format) {
-      const input = document.getElementById(inputId);
-      const output = document.getElementById(outputId);
-
-      const update = () => {
-        settings[key] = parseFloat(input.value);
-        output.textContent = format(settings[key]);
-      };
-
-      input.addEventListener("input", update);
-      update();
-    }
-
-    bindSlider("deadZone", "deadZoneOut", "deadZone", (v) => `${v.toFixed(1)}°`);
-    bindSlider("maxZone", "maxZoneOut", "maxZone", (v) => `${Math.round(v)}°`);
-    bindSlider("sensX", "sensXOut", "sensX", (v) => v.toFixed(1));
-    bindSlider("sensY", "sensYOut", "sensY", (v) => v.toFixed(1));
-    bindSlider("maxSpeed", "maxSpeedOut", "maxSpeed", (v) => `${Math.round(v)}`);
-
-    overlay.addEventListener("click", () => {
-      let permissionPromise = Promise.resolve("granted");
-
-      if (
-        "DeviceMotionEvent" in window &&
-        typeof DeviceMotionEvent.requestPermission === "function"
-      ) {
-        permissionPromise = DeviceMotionEvent.requestPermission();
-      }
-
-      permissionPromise
-        .then((result) => {
-          if (result === "granted" || result === undefined) {
-            if ("DeviceMotionEvent" in window) {
-              window.addEventListener("devicemotion", onMotion);
-            }
-
-            state.motionEnabled = true;
-            overlay.classList.add("hidden");
-          } else {
-            overlay.textContent = "Доступ к датчикам не разрешён.";
-          }
-        })
-        .catch((error) => {
-          const message = error && error.message ? error.message : String(error);
-          overlay.textContent = `Ошибка: ${message}`;
-        });
-    });
-
-    // Двойной тап по экрану — повторная калибровка центра.
-    let lastTap = 0;
-
-    window.addEventListener(
-      "pointerdown",
-      (event) => {
-        if (!state.motionEnabled) return;
-        if (event.target.closest("#controls")) return;
-        if (event.target.closest("#overlay")) return;
-
-        const now = Date.now();
-
-        if (now - lastTap < 300) {
-          state.baseSet = false;
-          state.samples = [];
-        }
-
-        lastTap = now;
-      },
-      { passive: true }
-    );
 
     requestAnimationFrame(frame);
   </script>
