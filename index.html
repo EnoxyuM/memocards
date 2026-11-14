@@ -44,6 +44,21 @@ html,body{height:100%;overflow:hidden;background:#0a0c0f;color:#cfd8e3;
 .face.back{display:none}
 .win.flipped .face.front{display:none}
 .win.flipped .face.back{display:block}
+
+/* --- long-press menu --- */
+#menu{position:fixed;z-index:10000;min-width:170px;padding:8px 0;border-radius:12px;
+  background:#1b232d;border:1px solid #33414f;box-shadow:0 18px 44px rgba(0,0,0,.7);
+  display:none;flex-direction:column;backdrop-filter:blur(12px)}
+#menu.open{display:flex}
+.mi{display:flex;align-items:center;gap:10px;padding:9px 14px;color:#dbe6f2;
+  font-size:14px;cursor:pointer;white-space:nowrap}
+.mi:hover{background:rgba(255,255,255,.07)}
+.mi input{appearance:none;-webkit-appearance:none;width:16px;height:16px;margin:0;
+  border:1.5px solid #5a728a;border-radius:4px;display:grid;place-items:center;
+  background:transparent;cursor:pointer;flex:0 0 auto}
+.mi input:checked{background:#4ea8de;border-color:#4ea8de}
+.mi input:checked::after{content:"";width:8px;height:4px;border-left:2px solid #0a0c0f;
+  border-bottom:2px solid #0a0c0f;transform:rotate(-45deg) translate(0.5px,-1px)}
 </style>
 </head>
 <body>
@@ -62,12 +77,19 @@ html,body{height:100%;overflow:hidden;background:#0a0c0f;color:#cfd8e3;
     <circle cx="12" cy="12" r="1.1" fill="#7fd4ff" opacity="0.9"/>
   </svg>
 </div>
+<div id="menu">
+  <label class="mi"><input type="checkbox" id="invX">invert X</label>
+  <label class="mi"><input type="checkbox" id="invY">invert Y</label>
+</div>
 <script>
 (function(){
 'use strict';
 
 var worldEl = document.getElementById('world');
 var ringEl  = document.getElementById('ring');
+var menuEl  = document.getElementById('menu');
+var invXEl  = document.getElementById('invX');
+var invYEl  = document.getElementById('invY');
 var MOBILE  = matchMedia('(hover: none) and (pointer: coarse)').matches;
 
 var camX = 0, camY = 0;
@@ -81,6 +103,7 @@ var stillCamX    = 0;
 var stillCamY    = 0;
 var lastModeSave = 0;
 
+var invertX = false, invertY = false;
 var RING_LEN = 65.97;
 
 /* ---------------- IndexedDB ---------------- */
@@ -199,7 +222,6 @@ function createWindow(x, y, o){
     var b = e.target.closest ? e.target.closest('.btn') : null;
     if (!b) return;
     var a = b.dataset.act;
-    /* на ПК квадрат/треугольник работают через перетаскивание */
     if (!MOBILE && (a === 'move' || a === 'resize')) return;
     e.stopPropagation();
     act(obj, a);
@@ -271,45 +293,58 @@ function applyMode(o, m){
   setRing(0, false);
 }
 
-/* ---------------- orientation (fixed) ---------------- */
+/* ---------------- orientation: quaternion-based (gimbal-lock safe) ---------------- */
 var orientReady = false, orientTried = false;
-var usingCompass = false;
-var lastAlpha = null;
-var rawYaw = 0, rawPitch = 0;
+var qYaw = 0, qPitch = 0;
 var smoothYaw = 0, smoothPitch = 0;
+var hasInitialYaw = false;
+
+function eulerToQuaternion(alpha, beta, gamma){
+  /* DeviceOrientation uses intrinsic Z-X'-Y'' (ZXY) order */
+  var a = alpha * Math.PI / 360;   /* half angles */
+  var b = beta  * Math.PI / 360;
+  var g = gamma * Math.PI / 360;
+
+  var ca = Math.cos(a), sa = Math.sin(a);
+  var cb = Math.cos(b), sb = Math.sin(b);
+  var cg = Math.cos(g), sg = Math.sin(g);
+
+  return {
+    w: ca * cb * cg + sa * sb * sg,
+    x: ca * sb * cg - sa * cb * sg,
+    y: sa * cb * cg + ca * sb * sg,
+    z: sa * cb * sg - ca * sb * cg
+  };
+}
+
+function quaternionYawPitch(q){
+  /* Extract a stable yaw (heading) and pitch from quaternion */
+  var sinYaw   = 2 * (q.w * q.z + q.x * q.y);
+  var cosYaw   = 1 - 2 * (q.y * q.y + q.z * q.z);
+  var yaw      = Math.atan2(sinYaw, cosYaw) * 180 / Math.PI;
+
+  var sinPitch = 2 * (q.w * q.x - q.y * q.z);
+  sinPitch = Math.max(-1, Math.min(1, sinPitch));
+  var pitch    = Math.asin(sinPitch) * 180 / Math.PI;
+
+  return { yaw: yaw, pitch: pitch };
+}
 
 function onOrient(e){
-  if (e.alpha == null && e.webkitCompassHeading == null) return;
+  if (e.alpha == null || e.beta == null || e.gamma == null) return;
   orientReady = true;
 
-  /* 1. iOS: webkitCompassHeading — стабильный курс */
-  if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading)){
-    usingCompass = true;
-    rawYaw = e.webkitCompassHeading;
-    rawPitch = (e.beta == null ? 45 : e.beta) - 45;
-    return;
+  var q = eulerToQuaternion(e.alpha, e.beta, e.gamma);
+  var rp = quaternionYawPitch(q);
+
+  if (!hasInitialYaw){
+    smoothYaw = rp.yaw;
+    smoothPitch = rp.pitch;
+    hasInitialYaw = true;
   }
 
-  /* 2. Android: абсолютный alpha из deviceorientationabsolute */
-  if (e.alpha != null && e.absolute === true && !usingCompass){
-    usingCompass = true;
-    rawYaw = 360 - e.alpha;
-    rawPitch = (e.beta == null ? 45 : e.beta) - 45;
-    return;
-  }
-
-  /* 3. Запасной вариант: накапливаем дельту alpha, отсекая выбросы */
-  if (e.alpha != null){
-    var a = e.alpha;
-    if (lastAlpha !== null){
-      var d = a - lastAlpha;
-      if (d > 180)  d -= 360;
-      if (d < -180) d += 360;
-      if (Math.abs(d) < 30) rawYaw += d;
-    }
-    lastAlpha = a;
-    rawPitch = (e.beta == null ? 45 : e.beta) - 45;
-  }
+  qYaw   = rp.yaw;
+  qPitch = rp.pitch;
 }
 
 function enableOrientation(){
@@ -317,9 +352,6 @@ function enableOrientation(){
   orientTried = true;
 
   function addListeners(){
-    if (window.DeviceOrientationEvent && 'ondeviceorientationabsolute' in window){
-      window.addEventListener('deviceorientationabsolute', onOrient);
-    }
     window.addEventListener('deviceorientation', onOrient);
   }
 
@@ -335,104 +367,151 @@ function enableOrientation(){
   } catch(err){}
 }
 
-/* ---------------- input ---------------- */
+/* ---------------- input: pan / tap / long-press menu ---------------- */
 var down = null;
 var suppressTap = false;
+var longPressTimer = null;
+var longPressFired = false;
+var menuOpen = false;
+var menuJustClosed = false;
 
-addEventListener('mousedown', function(e){
-  if (MOBILE || e.button !== 0) return;
+function openMenu(x, y){
+  menuOpen = true;
+  menuEl.classList.add('open');
+  var mw = 180, mh = 90;
+  var px = Math.min(x, innerWidth  - mw - 8);
+  var py = Math.min(y, innerHeight - mh - 8);
+  menuEl.style.left = Math.max(8, px) + 'px';
+  menuEl.style.top  = Math.max(8, py) + 'px';
+}
+
+function closeMenu(){
+  if (!menuOpen) return;
+  menuOpen = false;
+  menuJustClosed = true;
+  menuEl.classList.remove('open');
+  setTimeout(function(){ menuJustClosed = false; }, 0);
+}
+
+function cancelLongPress(){
+  if (longPressTimer){
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+  }
+}
+
+function startLongPress(x, y){
+  cancelLongPress();
+  longPressFired = false;
+  longPressTimer = setTimeout(function(){
+    longPressTimer = null;
+    longPressFired = true;
+    openMenu(x, y);
+  }, 500);
+}
+
+function endLongPress(){
+  cancelLongPress();
+}
+
+/* menu toggles */
+invXEl.addEventListener('change', function(){ invertX = invXEl.checked; });
+invYEl.addEventListener('change', function(){ invertY = invYEl.checked; });
+
+/* close menu on outside tap */
+document.addEventListener('pointerdown', function(e){
+  if (!menuOpen) return;
+  if (menuEl.contains(e.target)) return;
+  closeMenu();
+}, true);
+
+/* pointer down (covers mouse + touch) */
+document.addEventListener('pointerdown', function(e){
+  if (e.button !== undefined && e.button !== 0) return; /* only primary */
+  if (menuJustClosed) return;
+
   var t = e.target;
+  if (t.closest && t.closest('#menu')) return;
   if (t.closest && (t.closest('.btn') || t.closest('.face'))) return;
+
+  /* ignore taps on window chrome – those are handled by window logic */
+  if (t.closest && t.closest('.win') && !t.closest('.face')) {
+    /* allow long-press menu on window background too? keep simple: no */
+    return;
+  }
+
+  if (MOBILE) enableOrientation();
+
   down = {
     x: e.clientX, y: e.clientY,
     lx: e.clientX, ly: e.clientY,
     moved: false,
-    noCreate: !!(t.closest && t.closest('.win'))
+    noCreate: false,
+    pointerId: e.pointerId
   };
-});
 
-addEventListener('mousemove', function(e){
-  if (MOBILE) return;
+  startLongPress(e.clientX, e.clientY);
+}, { passive: true });
 
-  if (drag){
-    var dx = e.clientX - drag.sx;
-    var dy = e.clientY - drag.sy;
-    if (drag.kind === 'move'){
-      drag.o.x = drag.x0 + dx;
-      drag.o.y = drag.y0 + dy;
-    } else {
-      drag.o.w = Math.max(120, drag.w0 + dx);
-      drag.o.h = Math.max(80,  drag.h0 + dy);
-    }
-    return;
+/* pointer move */
+document.addEventListener('pointermove', function(e){
+  if (!down) return;
+
+  var dx = e.clientX - down.x, dy = e.clientY - down.y;
+  if (!down.moved && (dx*dx + dy*dy) > 16){
+    down.moved = true;
+    endLongPress();          /* moving cancels long-press */
   }
 
-  if (!down) return;
-  var mx2 = e.clientX - down.x, my2 = e.clientY - down.y;
-  if (!down.moved && (mx2*mx2 + my2*my2) > 16) down.moved = true;
-  if (down.moved){
+  if (!down.moved) return;
+
+  /* workspace panning (PC & mobile fallback) */
+  if (!MOBILE || !orientReady){
     camX -= (e.clientX - down.lx);
     camY -= (e.clientY - down.ly);
   }
   down.lx = e.clientX;
   down.ly = e.clientY;
-});
-
-addEventListener('mouseup', function(e){
-  if (MOBILE) return;
-
-  if (drag){ endDrag(); return; }
-  if (!down) return;
-
-  if (!down.moved && !down.noCreate && !modeWin){
-    var wx = e.clientX - innerWidth  / 2 + camX;
-    var wy = e.clientY - innerHeight / 2 + camY;
-    createWindow(wx - 130, wy - 85);
-  }
-  down = null;
-});
-
-addEventListener('blur', function(){
-  down = null;
-  if (drag) endDrag();
-});
-
-addEventListener('click', function(e){
-  if (!MOBILE) return;
-  if (suppressTap){ suppressTap = false; return; }
-  var t = e.target;
-  if (t.closest && t.closest('.win')) return;
-  createWindow(camX - 130, camY - 85);
-});
-
-var touchPt = null;
-
-addEventListener('touchstart', function(e){
-  enableOrientation();
-  if (e.touches.length !== 1){ touchPt = null; return; }
-  touchPt = { x: e.touches[0].clientX, y: e.touches[0].clientY, moved: false };
 }, { passive: true });
 
-addEventListener('touchmove', function(e){
-  if (!touchPt || orientReady || e.touches.length !== 1) return;
-  var tx = e.touches[0].clientX, ty = e.touches[0].clientY;
-  var dx = tx - touchPt.x, dy = ty - touchPt.y;
-  if (!touchPt.moved && (dx*dx + dy*dy) > 16) touchPt.moved = true;
-  if (touchPt.moved){
-    camX -= dx;
-    camY -= dy;
-    if (e.cancelable) e.preventDefault();
-  }
-  touchPt.x = tx;
-  touchPt.y = ty;
-}, { passive: false });
+/* pointer up */
+document.addEventListener('pointerup', function(e){
+  if (!down) return;
 
-addEventListener('touchend', function(){
-  if (touchPt && touchPt.moved) suppressTap = true;
-  touchPt = null;
+  var wasMoved = down.moved;
+  var wasLongPress = longPressFired;
+  down = null;
+  endLongPress();
+
+  if (menuOpen) return;
+  if (wasLongPress) return;
+  if (wasMoved) return;
+  if (menuJustClosed) return;
+
+  /* it was a tap → create window */
+  var wx, wy;
+  if (MOBILE){
+    wx = camX - 130;
+    wy = camY - 85;
+  } else {
+    wx = e.clientX - innerWidth  / 2 + camX - 130;
+    wy = e.clientY - innerHeight / 2 + camY - 85;
+  }
+  createWindow(wx, wy);
+}, { passive: true });
+
+/* pointer cancel / leave cleanup */
+document.addEventListener('pointercancel', function(){
+  down = null;
+  endLongPress();
 });
 
-/* ---------------- charge / dwell (мобильные) ---------------- */
+/* prevent context menu on long-press (browser callout) */
+document.addEventListener('contextmenu', function(e){
+  if (MOBILE) e.preventDefault();
+});
+
+/* ---------------- charge / dwell (mobile AOE) ---------------- */
 var chargeBtn = null, chargeStart = 0, firedBtn = null;
 var lastCCamX = 0, lastCCamY = 0;
 
@@ -492,10 +571,14 @@ function frame(t){
   lastT = t;
 
   if (MOBILE && orientReady){
-    smoothYaw   += (rawYaw   - smoothYaw)   * 0.08;
-    smoothPitch += (rawPitch - smoothPitch) * 0.18;
-    camX = -smoothYaw * 9;
-    var cy = smoothPitch * 7;
+    smoothYaw   += (qYaw   - smoothYaw)   * 0.08;
+    smoothPitch += (qPitch - smoothPitch) * 0.18;
+
+    var yaw = invertX ? -smoothYaw : smoothYaw;
+    var pit = invertY ? -smoothPitch : smoothPitch;
+
+    camX = -yaw * 9;
+    var cy = pit * 7;
     camY = cy > 1500 ? 1500 : (cy < -1500 ? -1500 : cy);
   }
 
