@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>360</title>
+<title>AR Windows</title>
 <style>
   html, body {
     margin: 0; padding: 0;
@@ -15,7 +15,21 @@
     user-select: none; -webkit-user-select: none;
     touch-action: none;
   }
-  #pano-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #camera-feed {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    display: none;
+    background: #000;
+    pointer-events: none;
+  }
+  #pano-canvas {
+    position: fixed; inset: 0;
+    display: block; width: 100%; height: 100%;
+    z-index: 1;
+    touch-action: none;
+  }
   #start-screen {
     position: fixed; inset: 0; z-index: 20;
     display: flex; align-items: center; justify-content: center;
@@ -39,7 +53,6 @@
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
 
-  /* FPS counter — только текст, без рамки и фона */
   #fps-counter {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top, 0px));
@@ -75,42 +88,15 @@
     border: 2px solid rgba(90, 208, 255, 0.9);
     pointer-events: none; will-change: transform;
   }
-  .action-btn {
-    position: fixed; width: 68px; height: 68px; border-radius: 50%;
-    background: rgba(90, 208, 255, 0.12);
-    border: 2px solid rgba(90, 208, 255, 0.6);
-    z-index: 15; display: none; align-items: center; justify-content: center;
-    font: 600 11px/1.1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    color: #8fe4ff; text-transform: uppercase; letter-spacing: 0.05em;
-    text-align: center; touch-action: none; padding: 4px; box-sizing: border-box;
-  }
-  .action-btn.active { display: flex; }
-  .action-btn:active { background: rgba(90, 208, 255, 0.35); }
-
-  #btn-build {
-    right: calc(24px + env(safe-area-inset-right, 0px));
-    bottom: calc(102px + env(safe-area-inset-bottom, 0px));
-  }
-  #btn-destroy {
-    right: calc(102px + env(safe-area-inset-right, 0px));
-    bottom: calc(102px + env(safe-area-inset-bottom, 0px));
-  }
-  #btn-jump {
-    right: calc(24px + env(safe-area-inset-right, 0px));
-    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-    width: 84px; height: 84px; font-size: 13px;
-  }
 </style>
 </head>
 <body>
+<video id="camera-feed" autoplay playsinline muted></video>
 <canvas id="pano-canvas"></canvas>
 <div id="crosshair"></div>
 <div id="fps-counter">-- FPS</div>
 <div id="start-screen">Tap to Start.</div>
 <div id="joystick"><div id="joystick-knob"></div></div>
-<div id="btn-build" class="action-btn">Build</div>
-<div id="btn-destroy" class="action-btn">Break</div>
-<div id="btn-jump" class="action-btn">Jump</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -129,237 +115,68 @@
     return false;
   })();
 
-  // Кап DPR: на мобилках ниже, чтобы снизить fill-rate (главный тормоз)
   const DPR_CAP = isMobile ? 1.5 : 2;
 
   /* ============================================================
      Renderer / Scene / Camera
      ============================================================ */
   const canvas = document.getElementById('pano-canvas');
+  const videoEl = document.getElementById('camera-feed');
+
   const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
-    antialias: !isMobile,          // MSAA на мобилках дорого + при высоком DPR не нужно
+    antialias: !isMobile,
     powerPreference: 'high-performance',
     stencil: false,
-    depth: true
+    depth: true,
+    alpha: true
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
-  renderer.setClearColor(0x0a0e14, 1);
+  renderer.setClearColor(0x000000, 0);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2000);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-  const sun1 = new THREE.DirectionalLight(0xffffff, 0.55);
-  sun1.position.set(30, 80, 20); scene.add(sun1);
-  const sun2 = new THREE.DirectionalLight(0xffffff, 0.25);
-  sun2.position.set(-40, 40, -30); scene.add(sun2);
-
   /* ============================================================
-     World
+     Camera feed (background)
      ============================================================ */
-  const CHUNK_SIZE = 16;
-  const VIEW_DIST = 3;
-  const MAX_WIN_DIST = 60;
-  const worldSeed = Math.floor(Math.random() * 1000000);
-  const chunks = new Map();
-
-  // Frustum-объекты для ручного отсечения чанков
-  const _frustum = new THREE.Frustum();
-  const _projScreenMatrix = new THREE.Matrix4();
-
-  function hash2(x, z, seed) {
-    let h = seed ^ Math.imul(x | 0, 0x27d4eb2d);
-    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
-    h = h ^ Math.imul(z | 0, 0xc2b2ae35);
-    h = Math.imul(h ^ (h >>> 13), 0x27d4eb2d);
-    return (h >>> 0) / 4294967296;
-  }
-  function smooth(t) { return t * t * (3 - 2 * t); }
-  function valueNoise(x, z, seed) {
-    const xi = Math.floor(x), zi = Math.floor(z);
-    const xf = x - xi, zf = z - zi;
-    const u = smooth(xf), v = smooth(zf);
-    const a = hash2(xi, zi, seed);
-    const b = hash2(xi + 1, zi, seed);
-    const c = hash2(xi, zi + 1, seed);
-    const d = hash2(xi + 1, zi + 1, seed);
-    return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
-  }
-  function terrainHeight(wx, wz) {
-    const n1 = valueNoise(wx * 0.05, wz * 0.05, worldSeed);
-    const n2 = valueNoise(wx * 0.2, wz * 0.2, worldSeed + 1);
-    return Math.floor(n1 * 12 + n2 * 3) - 2;
-  }
-
-  const blockMaterials = {
-    1: new THREE.MeshLambertMaterial({ color: 0x6abf4b }),
-    2: new THREE.MeshLambertMaterial({ color: 0x9c7554 }),
-    3: new THREE.MeshLambertMaterial({ color: 0x888888 }),
-    4: new THREE.MeshLambertMaterial({ color: 0xf0d060 })
-  };
-  const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
-
-  function generateChunk(cx, cz) {
-    const chunk = { cx, cz, blocks: new Map(), mesh: null, boundingSphere: null, modified: false };
-    const x0 = cx * CHUNK_SIZE, z0 = cz * CHUNK_SIZE;
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-        const wx = x0 + lx, wz = z0 + lz;
-        const h = terrainHeight(wx, wz);
-        for (let y = -4; y <= h; y++) {
-          let type;
-          if (y === h) type = 1;
-          else if (y >= h - 3) type = 2;
-          else type = 3;
-          chunk.blocks.set(wx + ',' + y + ',' + wz, type);
-        }
+  async function requestCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.warn('[camera] getUserMedia недоступен');
+      return;
+    }
+    const tries = [
+      { video: { facingMode: { ideal: 'environment' } }, audio: false },
+      { video: { facingMode: 'environment' }, audio: false },
+      { video: true, audio: false }
+    ];
+    for (let i = 0; i < tries.length; i++) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(tries[i]);
+        videoEl.srcObject = stream;
+        videoEl.style.display = 'block';
+        try { await videoEl.play(); } catch (e) { /* autoplay часто справляется */ }
+        return;
+      } catch (err) {
+        console.warn('[camera] попытка', i, 'не удалась:', err);
       }
     }
-    return chunk;
-  }
-
-  function buildChunkMesh(chunk) {
-    if (chunk.mesh) {
-      scene.remove(chunk.mesh);
-      chunk.mesh = null;
-    }
-    if (chunk.blocks.size === 0) { chunk.boundingSphere = null; return; }
-
-    const groups = {};
-    chunk.blocks.forEach((type, bkey) => {
-      if (!groups[type]) groups[type] = [];
-      groups[type].push(bkey);
-    });
-
-    const group = new THREE.Group();
-    group.matrixAutoUpdate = false;
-    group.updateMatrix();
-
-    const dummy = new THREE.Object3D();
-    const bbox = new THREE.Box3();
-
-    for (const typeStr in groups) {
-      const type = +typeStr;
-      const list = groups[type];
-      const mat = blockMaterials[type] || blockMaterials[3];
-      const mesh = new THREE.InstancedMesh(blockGeometry, mat, list.length);
-      mesh.frustumCulled = false;   // отсекаем на уровне чанка вручную
-      mesh.matrixAutoUpdate = false;
-      mesh.updateMatrix();
-      for (let i = 0; i < list.length; i++) {
-        const parts = list[i].split(',');
-        const px = +parts[0] + 0.5, py = +parts[1] + 0.5, pz = +parts[2] + 0.5;
-        dummy.position.set(px, py, pz);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-        bbox.expandByPoint(dummy.position);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
-      group.add(mesh);
-    }
-
-    // Bounding sphere по всему чанку — включая пользовательские постройки
-    const center = new THREE.Vector3();
-    bbox.getCenter(center);
-    const size = new THREE.Vector3();
-    bbox.getSize(size);
-    chunk.boundingSphere = new THREE.Sphere(center, size.length() / 2 + 1);
-
-    scene.add(group);
-    chunk.mesh = group;
-  }
-
-  function getChunk(cx, cz) {
-    const key = cx + ',' + cz;
-    let chunk = chunks.get(key);
-    if (!chunk) { chunk = generateChunk(cx, cz); chunks.set(key, chunk); buildChunkMesh(chunk); }
-    return chunk;
-  }
-
-  function getBlock(wx, wy, wz) {
-    const cx = Math.floor(wx / CHUNK_SIZE);
-    const cz = Math.floor(wz / CHUNK_SIZE);
-    const chunk = chunks.get(cx + ',' + cz);
-    if (!chunk) return 0;
-    return chunk.blocks.get(wx + ',' + wy + ',' + wz) || 0;
-  }
-
-  function setBlock(wx, wy, wz, type) {
-    const cx = Math.floor(wx / CHUNK_SIZE);
-    const cz = Math.floor(wz / CHUNK_SIZE);
-    const key = cx + ',' + cz;
-    let chunk = chunks.get(key);
-    if (!chunk) { chunk = { cx, cz, blocks: new Map(), mesh: null, boundingSphere: null, modified: false }; chunks.set(key, chunk); }
-    const bkey = wx + ',' + wy + ',' + wz;
-    if (type === 0) { if (!chunk.blocks.has(bkey)) return; chunk.blocks.delete(bkey); }
-    else { if (chunk.blocks.get(bkey) === type) return; chunk.blocks.set(bkey, type); }
-    chunk.modified = true;   // сохраняем такие чанки навсегда
-    buildChunkMesh(chunk);
+    console.warn('[camera] камера недоступна');
   }
 
   /* ============================================================
      Player
      ============================================================ */
-  const PLAYER_WIDTH = 0.6;
-  const PLAYER_HEIGHT = 1.7;
-  const EYE_HEIGHT = PLAYER_HEIGHT * 0.9;
-  const GRAVITY = 25;
-  const JUMP_VEL = 8.5;
+  const EYE_HEIGHT = 1.55;
   const MAX_SPEED = 5;
   const REACH = 6;
 
-  const playerPos = new THREE.Vector3(0.5, 0, 0.5);
-  const playerVel = new THREE.Vector3(0, 0, 0);
-  let grounded = false;
-  (function () { const h = terrainHeight(0, 0); playerPos.set(0.5, h + 1, 0.5); })();
+  const playerPos = new THREE.Vector3(0, 0, 0);
 
   const _camDir = new THREE.Vector3();
   function getCamDir() { camera.getWorldDirection(_camDir); return _camDir; }
 
-  function playerAABBSolid(x, y, z) {
-    const hw = PLAYER_WIDTH / 2;
-    const minX = Math.floor(x - hw), maxX = Math.floor(x + hw);
-    const minY = Math.floor(y), maxY = Math.floor(y + PLAYER_HEIGHT);
-    const minZ = Math.floor(z - hw), maxZ = Math.floor(z + hw);
-    for (let bx = minX; bx <= maxX; bx++)
-      for (let by = minY; by <= maxY; by++)
-        for (let bz = minZ; bz <= maxZ; bz++)
-          if (getBlock(bx, by, bz) !== 0)
-            if (x + hw > bx && x - hw < bx + 1 &&
-                y + PLAYER_HEIGHT > by && y < by + 1 &&
-                z + hw > bz && z - hw < bz + 1) return true;
-    return false;
-  }
-  function checkGrounded() {
-    const hw = PLAYER_WIDTH / 2 - 0.01;
-    const minBX = Math.floor(playerPos.x - hw), maxBX = Math.floor(playerPos.x + hw);
-    const minBZ = Math.floor(playerPos.z - hw), maxBZ = Math.floor(playerPos.z + hw);
-    const testY = Math.floor(playerPos.y - 0.05);
-    for (let bx = minBX; bx <= maxBX; bx++)
-      for (let bz = minBZ; bz <= maxBZ; bz++)
-        if (getBlock(bx, testY, bz) !== 0) return true;
-    return false;
-  }
-  function shouldAutoJump(dirX, dirZ) {
-    if (!grounded) return false;
-    const len = Math.hypot(dirX, dirZ);
-    if (len < 0.01) return false;
-    const nx = dirX / len, nz = dirZ / len;
-    const cx = playerPos.x + nx * 0.7, cz = playerPos.z + nz * 0.7;
-    const footBlock = getBlock(Math.floor(cx), Math.floor(playerPos.y + 0.1), Math.floor(cz));
-    if (footBlock === 0) return false;
-    const headBlock = getBlock(Math.floor(cx), Math.floor(playerPos.y + PLAYER_HEIGHT - 0.1), Math.floor(cz));
-    if (headBlock !== 0) return false;
-    if (getBlock(Math.floor(playerPos.x), Math.floor(playerPos.y + 1.2), Math.floor(playerPos.z)) !== 0) return false;
-    return true;
-  }
-
   function updatePlayer(dt) {
-    if (playerPos.y < -50) {
-      const h = terrainHeight(0, 0);
-      playerPos.set(0.5, h + 2, 0.5); playerVel.set(0, 0, 0);
-    }
     const camDir = getCamDir();
     let yawX = camDir.x, yawZ = camDir.z;
     const yawLen = Math.hypot(yawX, yawZ);
@@ -367,148 +184,17 @@
     const rightX = -yawZ, rightZ = yawX;
     const wishX = (yawX * joystickVec.z + rightX * joystickVec.x) * MAX_SPEED;
     const wishZ = (yawZ * joystickVec.z + rightZ * joystickVec.x) * MAX_SPEED;
-    if (shouldAutoJump(wishX, wishZ)) { playerVel.y = JUMP_VEL; grounded = false; }
-    playerVel.x = wishX; playerVel.z = wishZ;
-    playerVel.y -= GRAVITY * dt;
-    if (playerVel.y < -15) playerVel.y = -15;
-    const dx = playerVel.x * dt;
-    if (dx !== 0 && !playerAABBSolid(playerPos.x + dx, playerPos.y, playerPos.z)) playerPos.x += dx;
-    const dz = playerVel.z * dt;
-    if (dz !== 0 && !playerAABBSolid(playerPos.x, playerPos.y, playerPos.z + dz)) playerPos.z += dz;
-    const dy = playerVel.y * dt;
-    if (dy < 0) {
-      if (checkGrounded()) { playerVel.y = 0; grounded = true; }
-      else {
-        const ny = playerPos.y + dy;
-        if (playerAABBSolid(playerPos.x, ny, playerPos.z)) {
-          playerPos.y = Math.floor(ny) + 1; playerVel.y = 0; grounded = true;
-        } else { playerPos.y = ny; grounded = false; }
-      }
-    } else if (dy > 0) {
-      const ny = playerPos.y + dy;
-      if (playerAABBSolid(playerPos.x, ny, playerPos.z)) playerVel.y = 0;
-      else playerPos.y = ny;
-      grounded = false;
-    } else {
-      if (checkGrounded()) grounded = true;
-    }
+    playerPos.x += wishX * dt;
+    playerPos.z += wishZ * dt;
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
   }
 
   /* ============================================================
-     Chunks: load + unload
-     ============================================================ */
-  let lastChunkCX = null, lastChunkCZ = null;
-
-  function initialChunks() {
-    const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
-    const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
-    for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++)
-      for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) getChunk(pcx + dx, pcz + dz);
-    lastChunkCX = pcx; lastChunkCZ = pcz;
-  }
-
-  function updateChunks() {
-    const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
-    const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
-    if (pcx === lastChunkCX && pcz === lastChunkCZ) return;
-    lastChunkCX = pcx; lastChunkCZ = pcz;
-
-    // Загрузка новых
-    for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++)
-      for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) {
-        const cx = pcx + dx, cz = pcz + dz;
-        if (!chunks.has(cx + ',' + cz)) getChunk(cx, cz);
-      }
-
-    // Выгрузка: только немодифицированные и далеко
-    const unloadDist = VIEW_DIST + 2;
-    const toDelete = [];
-    chunks.forEach((chunk, key) => {
-      if (chunk.modified) return;
-      if (Math.abs(chunk.cx - pcx) > unloadDist || Math.abs(chunk.cz - pcz) > unloadDist) {
-        toDelete.push(key);
-      }
-    });
-    for (let i = 0; i < toDelete.length; i++) {
-      const key = toDelete[i];
-      const chunk = chunks.get(key);
-      if (chunk && chunk.mesh) scene.remove(chunk.mesh);
-      chunks.delete(key);
-    }
-  }
-
-  // Ручное фрустум-отсечение: один frustum-тест на чанк
-  function updateChunkVisibility() {
-    _projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    _frustum.setFromProjectionMatrix(_projScreenMatrix);
-    chunks.forEach((chunk) => {
-      if (!chunk.mesh) return;
-      if (!chunk.boundingSphere) { chunk.mesh.visible = true; return; }
-      chunk.mesh.visible = _frustum.intersectsSphere(chunk.boundingSphere);
-    });
-  }
-
-  /* ============================================================
-     Block raycast / build / destroy
-     ============================================================ */
-  function raycastBlock(maxDist) {
-    const dir = getCamDir().clone();
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
-    const step = 0.1;                       // было 0.05 — вдвое меньше итераций
-    let prev = { x: Math.floor(eye.x), y: Math.floor(eye.y), z: Math.floor(eye.z) };
-    for (let t = 0; t <= maxDist; t += step) {
-      const px = eye.x + dir.x * t, py = eye.y + dir.y * t, pz = eye.z + dir.z * t;
-      const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz);
-      if (getBlock(bx, by, bz) !== 0) return { hit: { x: bx, y: by, z: bz }, prev };
-      prev = { x: bx, y: by, z: bz };
-    }
-    return null;
-  }
-  function blockIntersectsPlayer(bx, by, bz) {
-    const hw = PLAYER_WIDTH / 2;
-    return (playerPos.x + hw > bx && playerPos.x - hw < bx + 1 &&
-            playerPos.y + PLAYER_HEIGHT > by && playerPos.y < by + 1 &&
-            playerPos.z + hw > bz && playerPos.z - hw < bz + 1);
-  }
-  function buildBlock() {
-    const res = raycastBlock(REACH); if (!res) return;
-    const { x, y, z } = res.prev;
-    if (blockIntersectsPlayer(x, y, z)) return;
-    setBlock(x, y, z, 4);
-  }
-  function destroyBlock() {
-    const res = raycastBlock(REACH); if (!res) return;
-    setBlock(res.hit.x, res.hit.y, res.hit.z, 0);
-  }
-  function doJump() { if (grounded) { playerVel.y = JUMP_VEL; grounded = false; } }
-
-  /* ============================================================
-     Aim placement
+     Aim placement — окна создаются в направлении взгляда
      ============================================================ */
   function getAimPlacement() {
     const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     const dir = getCamDir().clone();
-    const res = raycastBlock(REACH);
-    if (res) {
-      const hit = res.hit, prev = res.prev;
-      let nx = prev.x - hit.x, ny = prev.y - hit.y, nz = prev.z - hit.z;
-      if (Math.abs(nx) + Math.abs(ny) + Math.abs(nz) >= 0.5) {
-        const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
-        if (ax >= ay && ax >= az) { nx = nx > 0 ? 1 : -1; ny = 0; nz = 0; }
-        else if (ay >= ax && ay >= az) { nx = 0; ny = ny > 0 ? 1 : -1; nz = 0; }
-        else { nx = 0; ny = 0; nz = nz > 0 ? 1 : -1; }
-        return {
-          pos: new THREE.Vector3(
-            hit.x + 0.5 + nx * 0.51,
-            hit.y + 0.5 + ny * 0.51,
-            hit.z + 0.5 + nz * 0.51
-          ),
-          normal: new THREE.Vector3(nx, ny, nz),
-          attached: true
-        };
-      }
-    }
     const pos = eye.clone().add(dir.clone().multiplyScalar(REACH));
     const normal = dir.clone().negate().normalize();
     return { pos, normal, attached: false };
@@ -524,6 +210,7 @@
   const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
   const BTN_SIZE = 64, BTN_TOP = 8, BTN_RIGHT = 8, BTN_GAP = 3;
   const BTN_Z = 0.001;
+  const MAX_WIN_DIST = 60;
 
   function buttonRect(index) {
     const right = TEX_W - BTN_RIGHT - index * (BTN_SIZE + BTN_GAP);
@@ -893,7 +580,7 @@
 
     const aimAng = Math.acos(Math.max(-1, Math.min(1, mode.plantDir.dot(dir))));
     const eyeMoved = mode.plantOrigin.distanceTo(eye);
-    const isRunning = Math.hypot(playerVel.x, playerVel.z) > 0.1;
+    const isRunning = Math.hypot(joystickVec.x, joystickVec.z) > 0.1;
     const stable = aimAng <= MODE_TOL && eyeMoved <= 0.3 && !isRunning;
 
     if (!stable) {
@@ -1080,9 +767,6 @@
      ============================================================ */
   const joystickEl = document.getElementById('joystick');
   const joystickKnob = document.getElementById('joystick-knob');
-  const btnBuild = document.getElementById('btn-build');
-  const btnDestroy = document.getElementById('btn-destroy');
-  const btnJump = document.getElementById('btn-jump');
   const fpsEl = document.getElementById('fps-counter');
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
@@ -1094,16 +778,12 @@
 
   function forceReflowUI() {
     void joystickEl.offsetHeight;
-    void btnBuild.offsetHeight;
-    void btnDestroy.offsetHeight;
-    void btnJump.offsetHeight;
     void fpsEl.offsetHeight;
     void crosshair.offsetHeight;
   }
 
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
-
     if (joystickActive) {
       orientationPending = true;
       joystickVec.x = 0;
@@ -1111,7 +791,6 @@
     } else {
       forceReflowUI();
     }
-
     setTimeout(resize, 50);
     setTimeout(resize, 250);
     setTimeout(forceReflowUI, 300);
@@ -1162,32 +841,23 @@
   joystickEl.addEventListener('pointercancel', resetJoystick);
 
   /* ============================================================
-     Action buttons
+     Start
      ============================================================ */
-  function bindTap(el, fn) {
-    el.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
-  }
-  bindTap(btnBuild, buildBlock);
-  bindTap(btnDestroy, destroyBlock);
-  bindTap(btnJump, doJump);
+  let started = false, beginning = false, consumeNextTap = false;
 
-  /* ============================================================
-     Start / canvas input
-     ============================================================ */
-  let started = false, consumeNextTap = false;
+  async function begin() {
+    if (started || beginning) return;
+    beginning = true;
 
-  function begin() {
-    if (started) return;
+    // Запрашиваем камеру (может вызвать системный диалог)
+    try { await requestCamera(); } catch (e) {}
+
     started = true;
     startScreen.classList.add('hidden');
     crosshair.classList.add('visible');
     fpsEl.classList.add('visible');
     joystickEl.classList.add('active');
-    btnBuild.classList.add('active');
-    btnDestroy.classList.add('active');
-    btnJump.classList.add('active');
     warmUpKeyboard();
-    initialChunks();
     tryEnableGyro();
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     setTimeout(function () {
@@ -1199,6 +869,9 @@
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
+  /* ============================================================
+     Canvas input (look + tap to place window)
+     ============================================================ */
   let pointerInfo = null;
 
   canvas.addEventListener('pointerdown', function (e) {
@@ -1271,8 +944,6 @@
 
     if (started) {
       updatePlayer(dt);
-      updateChunks();
-      updateChunkVisibility();
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
