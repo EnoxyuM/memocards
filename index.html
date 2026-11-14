@@ -19,19 +19,6 @@
     width: 100%; height: 100%;
     touch-action: none;
   }
-
-  /* Окно, создаваемое по тапу */
-  .pano-window {
-    position: fixed;
-    width: 240px;
-    height: 160px;
-    box-sizing: border-box;
-    background: rgba(18, 18, 18, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 12px;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
-    z-index: 10;
-  }
 </style>
 </head>
 <body>
@@ -201,22 +188,77 @@
   }
 
   /* ============================================================
-     Окно по тапу на панораме
+     Окна на панораме (по тапу)
      ============================================================ */
-  const WIN_W = 240, WIN_H = 160;
-  let panoWindow = null;
+  function makeWindowTexture() {
+    const w = 256, h = 192;
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
 
-  canvas.addEventListener('click', function (e) {
-    if (panoWindow) return;   // окно уже создано
+    // рама
+    ctx.fillStyle = '#f2ece0';
+    ctx.fillRect(0, 0, w, h);
 
-    const x = Math.max(8, Math.min(e.clientX - WIN_W / 2, window.innerWidth  - WIN_W - 8));
-    const y = Math.max(8, Math.min(e.clientY - WIN_H / 2, window.innerHeight - WIN_H - 8));
+    // стекло
+    ctx.fillStyle = '#79c3f7';
+    ctx.fillRect(16, 16, w - 32, h - 32);
 
-    panoWindow = document.createElement('div');
-    panoWindow.className = 'pano-window';
-    panoWindow.style.left = x + 'px';
-    panoWindow.style.top  = y + 'px';
-    document.body.appendChild(panoWindow);
+    // блик
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0,    'rgba(255,255,255,0.60)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.05)');
+    g.addColorStop(1,    'rgba(255,255,255,0.35)');
+    ctx.fillStyle = g;
+    ctx.fillRect(16, 16, w - 32, h - 32);
+
+    // переплёт
+    ctx.fillStyle = '#f2ece0';
+    ctx.fillRect(w / 2 - 6, 16, 12, h - 32);
+    ctx.fillRect(16, h / 2 - 6, w - 32, 12);
+
+    // обводка
+    ctx.strokeStyle = '#7d6f57';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(3, 3, w - 6, h - 6);
+
+    const t = new THREE.CanvasTexture(cv);
+    t.minFilter = THREE.LinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    return t;
+  }
+
+  const windowTex = makeWindowTexture();
+  const WIN_W = 120;
+  const WIN_H = 90;
+
+  const raycaster = new THREE.Raycaster();
+  const pointer   = new THREE.Vector2();
+
+  function createWindowAt(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x =  ((clientX - rect.left) / rect.width)  * 2 - 1;
+    pointer.y = -((clientY - rect.top)  / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObject(sphere, false);
+    if (!hits.length) return;
+
+    // чуть внутрь сферы, чтобы не было мерцания поверхности
+    const pos = hits[0].point.clone().multiplyScalar(0.985);
+
+    const win = new THREE.Mesh(
+      new THREE.PlaneGeometry(WIN_W, WIN_H),
+      new THREE.MeshBasicMaterial({ map: windowTex, side: THREE.DoubleSide })
+    );
+    win.position.copy(pos);
+    win.lookAt(0, 0, 0);   // нормаль к центру сферы → окно "лежит" на панораме
+
+    scene.add(win);
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    createWindowAt(e.clientX, e.clientY);
   });
 
   /* ============================================================
