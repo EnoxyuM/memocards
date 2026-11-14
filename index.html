@@ -14,6 +14,7 @@
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
     touch-action: none;
+    -webkit-text-size-adjust: 100%;
   }
   body.xr-mode { background: transparent; }
 
@@ -71,6 +72,7 @@
     position: fixed; left: 50%; top: 50%;
     width: 22px; height: 22px; margin: -11px 0 0 -11px;
     z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.4s ease;
+    will-change: transform; backface-visibility: hidden;
   }
   #crosshair.visible { opacity: 1; }
   #crosshair::before, #crosshair::after {
@@ -80,7 +82,6 @@
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
 
-  /* ================= HUD ================= */
   #hud {
     position: fixed;
     top: calc(10px + env(safe-area-inset-top, 0px));
@@ -98,13 +99,13 @@
     border-radius: 6px;
     border: 1px solid rgba(90, 208, 255, 0.2);
     white-space: pre;
+    will-change: transform; backface-visibility: hidden;
   }
   #hud.visible { opacity: 1; }
   #hud .good { color: #7fff9a; }
   #hud .warn { color: #ffb060; }
   #hud .bad  { color: #ff7a7a; }
 
-  /* ================= Burger ================= */
   #burger-btn {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top, 0px));
@@ -124,6 +125,7 @@
     box-sizing: border-box;
     transition: background 0.2s ease, border-color 0.2s ease;
     -webkit-tap-highlight-color: transparent;
+    will-change: transform; backface-visibility: hidden;
   }
   #burger-btn.active { display: flex; }
   #burger-btn:active { background: rgba(90, 208, 255, 0.28); }
@@ -155,6 +157,7 @@
     font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 16px rgba(90, 208, 255, 0.15);
     display: none;
+    will-change: transform; backface-visibility: hidden;
   }
   #burger-menu.open { display: block; }
   #burger-menu .menu-title {
@@ -246,7 +249,7 @@
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.6.0</div>
+  <div id="start-version">v1.6.1</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -259,7 +262,7 @@
   /* ============================================================
      VERSION
      ============================================================ */
-  const VERSION = '1.6.0';
+  const VERSION = '1.6.1';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -329,6 +332,14 @@
   }
 
   /* ============================================================
+     UI tap tracking — чтобы один тап не проходил и в DOM, и в WebXR select
+     ============================================================ */
+  let uiTapTime = 0;
+  const UI_TAP_GUARD_MS = 250;
+  function markUITap() { uiTapTime = performance.now(); }
+  function recentUITap() { return performance.now() - uiTapTime < UI_TAP_GUARD_MS; }
+
+  /* ============================================================
      Settings (burger menu)
      ============================================================ */
   const burgerBtn = document.getElementById('burger-btn');
@@ -336,20 +347,17 @@
   const btnTimeSlider = document.getElementById('btn-time-slider');
   const btnTimeInput = document.getElementById('btn-time-input');
 
-  let buttonHoldTime = 0.5; // секунды удержания для срабатывания кнопки
+  let buttonHoldTime = 0.5;
 
   function applyButtonTime(v) {
     if (!isFinite(v)) return;
     v = Math.max(0.1, Math.min(2, v));
     buttonHoldTime = v;
-    // Синхронизируем оба контрола
     if (btnTimeSlider.value !== String(v)) btnTimeSlider.value = v;
     const displayVal = v.toFixed(2);
     if (btnTimeInput.value !== displayVal && btnTimeInput !== document.activeElement) {
       btnTimeInput.value = displayVal;
     }
-    // Сбрасываем текущий прогресс наведения — чтобы при смене настройки
-    // не оставалось «полузаполненных» кружков
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
       for (const id in w.buttons) {
@@ -367,7 +375,6 @@
   });
   btnTimeInput.addEventListener('input', function () {
     const v = parseFloat(btnTimeInput.value);
-    // Пока пользователь печатает, обновляем только если значение валидно
     if (isFinite(v) && v >= 0.1 && v <= 2) {
       buttonHoldTime = v;
       btnTimeSlider.value = v;
@@ -391,14 +398,19 @@
 
   burgerBtn.addEventListener('click', function (e) {
     e.stopPropagation();
+    markUITap();
     setMenuOpen(!isMenuOpen());
   });
 
-  // Клик вне меню (и не по бургеру) закрывает меню
+  // Помечаем любой тап по DOM-UI, чтобы WebXR select не отработал на нём же
   document.addEventListener('pointerdown', function (e) {
+    if (burgerBtn.contains(e.target) || burgerMenu.contains(e.target) || (editInput && editInput.contains(e.target))) {
+      markUITap();
+    }
     if (!isMenuOpen()) return;
     if (burgerBtn.contains(e.target)) return;
     if (burgerMenu.contains(e.target)) return;
+    markUITap();
     setMenuOpen(false);
   }, true);
 
@@ -497,20 +509,42 @@
     };
   }
 
+  // Перенос по словам + посимвольное дробление слишком длинных слов.
   function wrapText(ctx, text, maxWidth) {
     const paragraphs = String(text).split('\n');
     const lines = [];
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
       if (p === '') { lines.push(''); continue; }
-      const words = p.split(/\s+/);
+      const words = p.split(/\s+/).filter(function (w) { return w.length > 0; });
       let line = '';
       for (let j = 0; j < words.length; j++) {
-        const test = line ? line + ' ' + words[j] : words[j];
-        if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = words[j]; }
-        else line = test;
+        const word = words[j];
+        const test = line ? line + ' ' + word : word;
+        if (ctx.measureText(test).width <= maxWidth) {
+          line = test;
+          continue;
+        }
+        if (line) { lines.push(line); line = ''; }
+
+        // Слово само по себе не влезает — дробим посимвольно
+        if (ctx.measureText(word).width > maxWidth) {
+          let sub = '';
+          for (let k = 0; k < word.length; k++) {
+            const c = word[k];
+            if (sub && ctx.measureText(sub + c).width > maxWidth) {
+              lines.push(sub);
+              sub = c;
+            } else {
+              sub += c;
+            }
+          }
+          line = sub;
+        } else {
+          line = word;
+        }
       }
-      lines.push(line);
+      if (line) lines.push(line);
     }
     return lines;
   }
@@ -563,7 +597,7 @@
     if (text) {
       ctx.font = WINDOW_FONT; ctx.fillStyle = p.text;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const lines = wrapText(ctx, text, W - 100).slice(0, 4);
+      const lines = wrapText(ctx, text, W - 40).slice(0, 5);
       const lh = 38;
       const startY = H / 2 + 14 - (lines.length - 1) * lh / 2;
       for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W / 2, startY + i * lh);
@@ -772,7 +806,6 @@
     const b = found.btn;
     b.ring.visible = true;
     if (b.armed) {
-      // Нормируем прогресс: 0 → 1 за buttonHoldTime секунд
       b.progress += dt / Math.max(0.05, buttonHoldTime);
       if (b.progress >= 1) { b.progress = 0; b.armed = false; fireButton(found.win, b.id); }
     }
@@ -897,9 +930,13 @@
     editInput.setAttribute('autocorrect', 'off');
     editInput.setAttribute('autocapitalize', 'sentences');
     editInput.rows = 3;
+    // Позиционируем БЕЗ вертикального ре-центрирования — иначе при росте
+    // textarea (перенос строки) он «прыгает» и перерисовывает окружение.
     Object.assign(editInput.style, {
-      position: 'fixed', left: '50%', top: '25%',
-      transform: 'translate(-50%, -50%)',
+      position: 'fixed',
+      left: '50%',
+      top: '72px',
+      transform: 'translateX(-50%)',
       width: '78%', maxWidth: '440px', boxSizing: 'border-box',
       padding: '14px 18px', fontSize: '20px',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
@@ -908,7 +945,10 @@
       boxShadow: '0 0 24px rgba(90,208,255,0.55)',
       zIndex: 100, outline: 'none', display: 'none',
       caretColor: '#5ad0ff', resize: 'none',
-      lineHeight: '1.35', minHeight: '80px', maxHeight: '42vh', overflowY: 'auto'
+      lineHeight: '1.35', minHeight: '80px', maxHeight: '42vh', overflowY: 'auto',
+      willChange: 'transform',
+      backfaceVisibility: 'hidden',
+      WebkitBackfaceVisibility: 'hidden'
     });
     document.body.appendChild(editInput);
     editInput.addEventListener('keydown', function (e) {
@@ -1022,7 +1062,7 @@
   function applyLook() { _lookEuler.set(lookPitch, lookYaw, 0, 'YXZ'); camera.quaternion.setFromEuler(_lookEuler); }
 
   /* ============================================================
-     Resize
+     Resize (debounced)
      ============================================================ */
   function resize() {
     if (renderer.xr.isPresenting) return;
@@ -1037,6 +1077,12 @@
     updateVideoFit();
   }
 
+  let resizeTimer = null;
+  function scheduleResize() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 100);
+  }
+
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
 
@@ -1046,13 +1092,14 @@
     setTimeout(resize, 250);
     setTimeout(updateVideoFit, 300);
   });
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', scheduleResize);
 
   /* ============================================================
      HUD
      ============================================================ */
   function updateHUD() {
     if (!started) { hudEl.classList.remove('visible'); return; }
+    if (editingWin) return; // не трогаем DOM, пока клавиатура открыта
     hudEl.classList.add('visible');
     const pos = xrMode ? _xrViewerPos : getEye();
     const moving = xrViewerPosChanges > 5;
@@ -1068,7 +1115,7 @@
       'pos: <span class="' + posCls + '">' +
         pos.x.toFixed(2) + ' ' + pos.y.toFixed(2) + ' ' + pos.z.toFixed(2) +
       '</span>\n' +
-      'btn: ' + buttonHoldTime.toFixed(2) + 's  win: ' + windows.length + '  v' + VERSION;
+      'win: ' + windows.length + '  v' + VERSION;
   }
 
   /* ============================================================
@@ -1175,7 +1222,10 @@
 
   function onXRSelect() {
     if (!started) return;
-    if (isMenuOpen()) { setMenuOpen(false); return; }
+    // Тап по DOM-UI уже отработал через click — не дублируем в select
+    if (recentUITap()) return;
+    if (isMenuOpen()) return;
+
     const found = getButtonUnderCrosshair();
     if (found) {
       found.btn.progress = 0;
@@ -1327,7 +1377,7 @@
 
   canvas.addEventListener('pointerdown', function (e) {
     if (!started || xrMode) return;
-    if (isMenuOpen()) { setMenuOpen(false); consumeNextTap = true; return; }
+    if (recentUITap()) { consumeNextTap = true; return; }
     if (editingWin) { commitEdit(); consumeNextTap = true; return; }
     pointerInfo = {
       id: e.pointerId, lastX: e.clientX, lastY: e.clientY,
@@ -1355,6 +1405,7 @@
     const info = pointerInfo;
     pointerInfo = null;
     if (!started || xrMode) return;
+    if (recentUITap()) return;
     if (performance.now() - lastEditEnd < 300) return;
     if (info.moved < 12 && performance.now() - info.t < 700) {
       if (mode) { mode = null; hideModeVisuals(); }
