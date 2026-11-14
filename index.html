@@ -80,6 +80,7 @@
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
 
+  /* ================= HUD ================= */
   #hud {
     position: fixed;
     top: calc(10px + env(safe-area-inset-top, 0px));
@@ -102,6 +103,128 @@
   #hud .good { color: #7fff9a; }
   #hud .warn { color: #ffb060; }
   #hud .bad  { color: #ff7a7a; }
+
+  /* ================= Burger ================= */
+  #burger-btn {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    width: 44px; height: 44px;
+    z-index: 30;
+    background: rgba(10, 14, 20, 0.72);
+    border: 1.5px solid rgba(90, 208, 255, 0.55);
+    border-radius: 10px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #burger-btn.active { display: flex; }
+  #burger-btn:active { background: rgba(90, 208, 255, 0.28); }
+  #burger-btn span {
+    display: block;
+    width: 20px; height: 2px;
+    background: #8fe4ff;
+    border-radius: 1px;
+    box-shadow: 0 0 4px rgba(90, 208, 255, 0.6);
+    transition: transform 0.2s ease, opacity 0.2s ease;
+  }
+  #burger-btn.open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  #burger-btn.open span:nth-child(2) { opacity: 0; }
+  #burger-btn.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+  #burger-menu {
+    position: fixed;
+    top: calc(64px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    width: 260px;
+    max-width: calc(100vw - 24px);
+    z-index: 31;
+    background: rgba(10, 14, 20, 0.94);
+    border: 1.5px solid rgba(90, 208, 255, 0.55);
+    border-radius: 12px;
+    padding: 14px 16px 16px;
+    box-sizing: border-box;
+    color: #c8d8e0;
+    font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 16px rgba(90, 208, 255, 0.15);
+    display: none;
+  }
+  #burger-menu.open { display: block; }
+  #burger-menu .menu-title {
+    font: 600 11px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color: #5ad0ff;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  #burger-menu .menu-label {
+    display: block;
+    font-size: 12px;
+    color: #a8c0d0;
+    margin-bottom: 10px;
+  }
+  #burger-menu .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #burger-menu input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    background: rgba(90, 208, 255, 0.22);
+    border-radius: 2px;
+    outline: none;
+    min-width: 0;
+    margin: 0;
+  }
+  #burger-menu input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px; height: 18px;
+    background: #5ad0ff;
+    border-radius: 50%;
+    border: 2px solid #0d0d11;
+    box-shadow: 0 0 8px rgba(90, 208, 255, 0.8);
+    cursor: pointer;
+  }
+  #burger-menu input[type="range"]::-moz-range-thumb {
+    width: 18px; height: 18px;
+    background: #5ad0ff;
+    border-radius: 50%;
+    border: 2px solid #0d0d11;
+    box-shadow: 0 0 8px rgba(90, 208, 255, 0.8);
+    cursor: pointer;
+  }
+  #burger-menu input[type="number"] {
+    width: 64px;
+    padding: 6px 8px;
+    background: rgba(90, 208, 255, 0.08);
+    border: 1.5px solid rgba(90, 208, 255, 0.4);
+    border-radius: 6px;
+    color: #e9f8ff;
+    font: 500 13px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    text-align: center;
+    outline: none;
+    box-sizing: border-box;
+    -moz-appearance: textfield;
+  }
+  #burger-menu input[type="number"]::-webkit-inner-spin-button,
+  #burger-menu input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none; margin: 0;
+  }
+  #burger-menu input[type="number"]:focus {
+    border-color: #5ad0ff;
+    box-shadow: 0 0 8px rgba(90, 208, 255, 0.4);
+  }
 </style>
 </head>
 <body>
@@ -109,10 +232,21 @@
 <canvas id="pano-canvas"></canvas>
 <div id="crosshair"></div>
 <div id="hud"></div>
+<button id="burger-btn" aria-label="Menu">
+  <span></span><span></span><span></span>
+</button>
+<div id="burger-menu">
+  <div class="menu-title">Settings</div>
+  <label class="menu-label">Button Time</label>
+  <div class="row">
+    <input type="range" id="btn-time-slider" min="0.1" max="2" step="0.05" value="0.5">
+    <input type="number" id="btn-time-input" min="0.1" max="2" step="0.05" value="0.5">
+  </div>
+</div>
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.5.0</div>
+  <div id="start-version">v1.6.0</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -123,9 +257,9 @@
   if (typeof THREE === 'undefined') { console.error('[pano] Three.js не загрузился'); return; }
 
   /* ============================================================
-     VERSION — повышать при каждом обновлении
+     VERSION
      ============================================================ */
-  const VERSION = '1.5.0';
+  const VERSION = '1.6.0';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -145,7 +279,6 @@
   const videoEl = document.getElementById('camera-feed');
   const hudEl = document.getElementById('hud');
   const startModeEl = document.getElementById('start-mode');
-  const startVersionEl = document.getElementById('start-version');
 
   const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
@@ -177,7 +310,6 @@
   const _xrPrevViewerPos = new THREE.Vector3(Infinity, Infinity, Infinity);
   const _tmpM4 = new THREE.Matrix4();
 
-  // Fallback state
   const EYE_HEIGHT = 1.55;
   const REACH = 6;
   const playerPos = new THREE.Vector3(0, 0, 0);
@@ -187,7 +319,6 @@
   function getEye() {
     return new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
   }
-
   function getCurrentEye() {
     if (xrMode) return _xrViewerPos.clone();
     return getEye();
@@ -196,6 +327,80 @@
     if (xrMode) return new THREE.Vector3(0, 0, -1).applyQuaternion(_xrViewerQuat).normalize();
     return getCamDir().clone();
   }
+
+  /* ============================================================
+     Settings (burger menu)
+     ============================================================ */
+  const burgerBtn = document.getElementById('burger-btn');
+  const burgerMenu = document.getElementById('burger-menu');
+  const btnTimeSlider = document.getElementById('btn-time-slider');
+  const btnTimeInput = document.getElementById('btn-time-input');
+
+  let buttonHoldTime = 0.5; // секунды удержания для срабатывания кнопки
+
+  function applyButtonTime(v) {
+    if (!isFinite(v)) return;
+    v = Math.max(0.1, Math.min(2, v));
+    buttonHoldTime = v;
+    // Синхронизируем оба контрола
+    if (btnTimeSlider.value !== String(v)) btnTimeSlider.value = v;
+    const displayVal = v.toFixed(2);
+    if (btnTimeInput.value !== displayVal && btnTimeInput !== document.activeElement) {
+      btnTimeInput.value = displayVal;
+    }
+    // Сбрасываем текущий прогресс наведения — чтобы при смене настройки
+    // не оставалось «полузаполненных» кружков
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      for (const id in w.buttons) {
+        w.buttons[id].progress = 0;
+        w.buttons[id].armed = true;
+        w.buttons[id].ring.visible = false;
+        w.buttons[id].prog.visible = false;
+        w.buttons[id].prog.scale.setScalar(0.0001);
+      }
+    }
+  }
+
+  btnTimeSlider.addEventListener('input', function () {
+    applyButtonTime(parseFloat(btnTimeSlider.value));
+  });
+  btnTimeInput.addEventListener('input', function () {
+    const v = parseFloat(btnTimeInput.value);
+    // Пока пользователь печатает, обновляем только если значение валидно
+    if (isFinite(v) && v >= 0.1 && v <= 2) {
+      buttonHoldTime = v;
+      btnTimeSlider.value = v;
+    }
+  });
+  btnTimeInput.addEventListener('blur', function () {
+    const v = parseFloat(btnTimeInput.value);
+    if (!isFinite(v)) { btnTimeInput.value = buttonHoldTime.toFixed(2); return; }
+    applyButtonTime(v);
+    btnTimeInput.value = buttonHoldTime.toFixed(2);
+  });
+  btnTimeInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); btnTimeInput.blur(); }
+  });
+
+  function setMenuOpen(open) {
+    burgerMenu.classList.toggle('open', open);
+    burgerBtn.classList.toggle('open', open);
+  }
+  function isMenuOpen() { return burgerMenu.classList.contains('open'); }
+
+  burgerBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setMenuOpen(!isMenuOpen());
+  });
+
+  // Клик вне меню (и не по бургеру) закрывает меню
+  document.addEventListener('pointerdown', function (e) {
+    if (!isMenuOpen()) return;
+    if (burgerBtn.contains(e.target)) return;
+    if (burgerMenu.contains(e.target)) return;
+    setMenuOpen(false);
+  }, true);
 
   /* ============================================================
      Camera feed (fallback)
@@ -264,7 +469,6 @@
   /* ============================================================
      Windows
      ============================================================ */
-  // Уменьшено в ~1.8 раза (было 1.0 × 0.75, стало 0.55 × 0.4125).
   const WIN_W = 0.55;
   const WIN_H = 0.4125;
   const TEX_W = 512, TEX_H = 384;
@@ -450,23 +654,14 @@
     }
   }
 
-  // ИСПРАВЛЕНО: окно всегда разворачивается ЛИЦОМ к зрителю.
-  // Раньше при hit-test (attached) нормаль считалась от камеры к точке
-  // и получалась инвертированной — окно смотрело "спиной", текстура
-  // зеркалилась, а хитбоксы кнопок (FrontSide) не ловились рейкастом.
   function orientWindowToPlacement(win, placement) {
     win.group.position.copy(placement.pos);
-
     const eye = getCurrentEye();
     const toEye = eye.clone().sub(placement.pos);
-
     if (toEye.lengthSq() < 1e-6) {
-      // Защита от вырожденного случая: eye == pos.
-      const dir = getCurrentDir();
-      toEye.copy(dir).negate();
+      toEye.copy(getCurrentDir()).negate();
     }
     toEye.normalize();
-
     win.group.lookAt(
       placement.pos.x + toEye.x,
       placement.pos.y + toEye.y,
@@ -557,7 +752,7 @@
   }
 
   function updateHover(dt) {
-    if (mode || editingWin) { clearAllButtonVisuals(); return; }
+    if (mode || editingWin || isMenuOpen()) { clearAllButtonVisuals(); return; }
     const found = getButtonUnderCrosshair();
 
     for (let i = 0; i < windows.length; i++) {
@@ -577,12 +772,13 @@
     const b = found.btn;
     b.ring.visible = true;
     if (b.armed) {
-      b.progress += dt;
+      // Нормируем прогресс: 0 → 1 за buttonHoldTime секунд
+      b.progress += dt / Math.max(0.05, buttonHoldTime);
       if (b.progress >= 1) { b.progress = 0; b.armed = false; fireButton(found.win, b.id); }
     }
     if (b.progress > 0.001) {
       b.prog.visible = true;
-      b.prog.scale.setScalar(Math.max(0.0001, b.progress));
+      b.prog.scale.setScalar(Math.max(0.0001, Math.min(1, b.progress)));
     } else b.prog.visible = false;
   }
 
@@ -841,9 +1037,6 @@
     updateVideoFit();
   }
 
-  /* ============================================================
-     UI refs
-     ============================================================ */
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
 
@@ -875,7 +1068,7 @@
       'pos: <span class="' + posCls + '">' +
         pos.x.toFixed(2) + ' ' + pos.y.toFixed(2) + ' ' + pos.z.toFixed(2) +
       '</span>\n' +
-      'win: ' + windows.length + '  v' + VERSION;
+      'btn: ' + buttonHoldTime.toFixed(2) + 's  win: ' + windows.length + '  v' + VERSION;
   }
 
   /* ============================================================
@@ -912,7 +1105,6 @@
     }
 
     xrSession = session;
-
     activeRefSpaceType = await pickRefSpaceType(session);
     console.log('[xr] reference space:', activeRefSpaceType);
 
@@ -975,12 +1167,15 @@
     startScreen.classList.remove('hidden');
     crosshair.classList.remove('visible');
     hudEl.classList.remove('visible');
+    burgerBtn.classList.remove('active');
+    setMenuOpen(false);
     started = false;
     beginning = false;
   }
 
   function onXRSelect() {
     if (!started) return;
+    if (isMenuOpen()) { setMenuOpen(false); return; }
     const found = getButtonUnderCrosshair();
     if (found) {
       found.btn.progress = 0;
@@ -1101,6 +1296,7 @@
     started = true;
     startScreen.classList.add('hidden');
     crosshair.classList.add('visible');
+    burgerBtn.classList.add('active');
     warmUpKeyboard();
     resize();
   }
@@ -1131,6 +1327,7 @@
 
   canvas.addEventListener('pointerdown', function (e) {
     if (!started || xrMode) return;
+    if (isMenuOpen()) { setMenuOpen(false); consumeNextTap = true; return; }
     if (editingWin) { commitEdit(); consumeNextTap = true; return; }
     pointerInfo = {
       id: e.pointerId, lastX: e.clientX, lastY: e.clientY,
