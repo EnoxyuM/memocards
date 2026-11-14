@@ -35,11 +35,7 @@
   }
 
   /* ============================================================
-     Тестовая equirect-панорама: 4 цветные стороны + подписи
-     u=0   BACK    зелёный
-     u=0.25 LEFT   жёлтый
-     u=0.5 FRONT   оранжевый (видно сразу)
-     u=0.75 RIGHT  синий
+     Тестовая панорама (4 стороны, FRONT виден сразу)
      ============================================================ */
   function generateTestPano() {
     const W = 2048, H = 1024;
@@ -47,10 +43,10 @@
     cv.width = W; cv.height = H;
     const ctx = cv.getContext('2d');
 
-    ctx.fillStyle = '#4CAF50'; ctx.fillRect(0,      0, W/4, H);
-    ctx.fillStyle = '#FFEB3B'; ctx.fillRect(W/4,    0, W/4, H);
-    ctx.fillStyle = '#FF5722'; ctx.fillRect(W/2,    0, W/4, H);
-    ctx.fillStyle = '#2196F3'; ctx.fillRect(3*W/4,  0, W/4, H);
+    ctx.fillStyle = '#4CAF50'; ctx.fillRect(0,     0, W/4, H);
+    ctx.fillStyle = '#FFEB3B'; ctx.fillRect(W/4,   0, W/4, H);
+    ctx.fillStyle = '#FF5722'; ctx.fillRect(W/2,   0, W/4, H);
+    ctx.fillStyle = '#2196F3'; ctx.fillRect(3*W/4, 0, W/4, H);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 2;
@@ -93,7 +89,6 @@
 
   const scene  = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1100);
-  camera.rotation.order = 'YXZ';
 
   const tex = new THREE.CanvasTexture(generateTestPano());
   tex.minFilter = THREE.LinearFilter;
@@ -103,8 +98,7 @@
     new THREE.SphereGeometry(500, 60, 40),
     new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
   );
-  // чтобы u=0.5 (FRONT, оранжевый) смотрел прямо перед камерой
-  sphere.rotation.y = Math.PI / 2;
+  sphere.rotation.y = Math.PI / 2;   // FRONT прямо перед камерой
   scene.add(sphere);
 
   /* ============================================================
@@ -125,55 +119,10 @@
   });
 
   /* ============================================================
-     Drag (работает, пока гироскоп не включён)
+     Гироскоп — включается сразу, на iOS — по первому тапу
      ============================================================ */
-  let lon = 0, lat = 0;
-  let lonStart = 0, latStart = 0;
-  let dragging = false, sx = 0, sy = 0;
-  const MAXLAT = Math.PI / 2 - 0.01;
-
-  function clampLat() {
-    if (lat >  MAXLAT) lat =  MAXLAT;
-    if (lat < -MAXLAT) lat = -MAXLAT;
-  }
-
-  function onStart(x, y) {
-    if (gyroEnabled) return;
-    dragging = true;
-    sx = x; sy = y;
-    lonStart = lon; latStart = lat;
-  }
-  function onMove(x, y) {
-    if (!dragging || gyroEnabled) return;
-    lon = lonStart - (x - sx) * 0.005;
-    lat = latStart - (y - sy) * 0.005;
-    clampLat();
-  }
-  function onEnd() { dragging = false; }
-
-  canvas.addEventListener('touchstart', function (e) {
-    tryEnableGyro();
-    if (e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: true });
-  canvas.addEventListener('touchmove', function (e) {
-    if (e.touches.length === 1) onMove(e.touches[0].clientX, e.touches[0].clientY);
-  }, { passive: true });
-  canvas.addEventListener('touchend',    onEnd);
-  canvas.addEventListener('touchcancel', onEnd);
-
-  canvas.addEventListener('mousedown', function (e) {
-    tryEnableGyro();
-    onStart(e.clientX, e.clientY);
-  });
-  window.addEventListener('mousemove', function (e) { onMove(e.clientX, e.clientY); });
-  window.addEventListener('mouseup',   onEnd);
-
-  /* ============================================================
-     Гироскоп — включается на первом тапе
-     ============================================================ */
-  let gyroEnabled = false;
-  let gyroTried   = false;
-  let gotGyroData = false;
+  let gyroOn = false;
+  let requestInFlight = false;
 
   const dev = { alpha: 0, beta: 0, gamma: 0 };
   let screenOrient = window.orientation || 0;
@@ -183,13 +132,44 @@
     dev.alpha = e.alpha || 0;
     dev.beta  = e.beta  || 0;
     dev.gamma = e.gamma || 0;
-    gotGyroData = true;
   });
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
   });
 
-  const DEG = Math.PI / 180;
+  function tryEnableGyro() {
+    if (gyroOn || requestInFlight) return;
+
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ — нужен жест пользователя (это вызывает Safari)
+      requestInFlight = true;
+      DeviceOrientationEvent.requestPermission()
+        .then(function (p) {
+          requestInFlight = false;
+          if (p === 'granted') gyroOn = true;
+        })
+        .catch(function () {
+          requestInFlight = false;
+          // Safari отклонил без жеста — попробуем на следующем тапе
+        });
+    } else {
+      // Android / desktop — включается сразу
+      gyroOn = true;
+    }
+  }
+
+  // 1) сразу на загрузке
+  tryEnableGyro();
+
+  // 2) на любой тап / клик (нужно только для iOS)
+  document.addEventListener('touchstart', tryEnableGyro, { passive: true });
+  document.addEventListener('click',      tryEnableGyro);
+
+  /* ============================================================
+     Применение гироскопа к камере
+     ============================================================ */
+  const DEG    = Math.PI / 180;
   const zee    = new THREE.Vector3(0, 0, 1);
   const _euler = new THREE.Euler();
   const q0     = new THREE.Quaternion();
@@ -207,44 +187,12 @@
     camera.quaternion.multiply(q0.setFromAxisAngle(zee, -o));
   }
 
-  function tryEnableGyro() {
-    if (gyroTried) return;
-    gyroTried = true;
-
-    if (typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
-      // iOS 13+
-      DeviceOrientationEvent.requestPermission().then(function (p) {
-        if (p === 'granted') {
-          gyroEnabled = true;
-          // если данные так и не пришли (нет гироскопа) — откатываемся на drag
-          setTimeout(function () {
-            if (!gotGyroData) gyroEnabled = false;
-          }, 1200);
-        }
-      }).catch(function () { /* пользователь отказал — остаёмся на drag */ });
-    } else {
-      // Android / desktop
-      gyroEnabled = true;
-      setTimeout(function () {
-        if (!gotGyroData) gyroEnabled = false;
-      }, 1200);
-    }
-  }
-
   /* ============================================================
-     Рендер-цикл
+     Рендер
      ============================================================ */
   function render() {
     requestAnimationFrame(render);
-
-    if (gyroEnabled) {
-      applyGyro();
-    } else {
-      camera.rotation.y = lon;
-      camera.rotation.x = lat;
-    }
-
+    if (gyroOn) applyGyro();
     renderer.render(scene, camera);
   }
 
