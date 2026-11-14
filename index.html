@@ -35,14 +35,38 @@
   }
   #start-screen {
     position: fixed; inset: 0; z-index: 20;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
     background: #0a0e14; color: #5ad0ff;
     font: 600 30px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     letter-spacing: 0.08em;
     text-shadow: 0 0 20px rgba(90, 208, 255, 0.55);
     cursor: pointer; transition: opacity 0.45s ease;
+    text-align: center;
+    padding: 0 24px;
+    box-sizing: border-box;
   }
   #start-screen.hidden { opacity: 0; pointer-events: none; }
+  #start-title { font-size: 30px; }
+  #start-sub {
+    font-size: 14px; font-weight: 500; margin-top: 14px;
+    color: #8fe4ff; letter-spacing: 0.04em;
+    text-shadow: none;
+  }
+  #start-version {
+    font: 500 12px/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    margin-top: 22px; color: #4aa9d0; letter-spacing: 0.05em;
+    text-shadow: none;
+  }
+  #start-mode {
+    font-size: 13px; font-weight: 500; margin-top: 26px;
+    color: #a0b6c4; letter-spacing: 0.03em;
+    text-shadow: none;
+    max-width: 340px; line-height: 1.5;
+  }
+  #start-mode .warn { color: #ffb060; }
+  #start-mode .err  { color: #ff7a7a; }
+
   #crosshair {
     position: fixed; left: 50%; top: 50%;
     width: 22px; height: 22px; margin: -11px 0 0 -11px;
@@ -55,19 +79,54 @@
   }
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
+
+  #hud {
+    position: fixed;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left: calc(10px + env(safe-area-inset-left, 0px));
+    z-index: 25;
+    color: #8fe4ff;
+    font: 500 10px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: 0.03em;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    text-shadow: 0 0 2px #000, 0 0 4px #000, 0 0 8px rgba(90, 208, 255, 0.4);
+    background: rgba(0, 0, 0, 0.35);
+    padding: 6px 9px;
+    border-radius: 6px;
+    border: 1px solid rgba(90, 208, 255, 0.2);
+    white-space: pre;
+  }
+  #hud.visible { opacity: 1; }
+  #hud .good { color: #7fff9a; }
+  #hud .warn { color: #ffb060; }
+  #hud .bad  { color: #ff7a7a; }
 </style>
 </head>
 <body>
 <video id="camera-feed" autoplay playsinline muted></video>
 <canvas id="pano-canvas"></canvas>
 <div id="crosshair"></div>
-<div id="start-screen">Tap to Start.</div>
+<div id="hud"></div>
+<div id="start-screen">
+  <div id="start-title">Tap to Start.</div>
+  <div id="start-sub">AR Windows</div>
+  <div id="start-version">v1.4.0</div>
+  <div id="start-mode">Определяем поддержку AR…</div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function () {
   'use strict';
   if (typeof THREE === 'undefined') { console.error('[pano] Three.js не загрузился'); return; }
+
+  /* ============================================================
+     VERSION — повышать при каждом обновлении страницы
+     ============================================================ */
+  const VERSION = '1.4.0';
+  document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
 
@@ -84,6 +143,9 @@
      ============================================================ */
   const canvas = document.getElementById('pano-canvas');
   const videoEl = document.getElementById('camera-feed');
+  const hudEl = document.getElementById('hud');
+  const startModeEl = document.getElementById('start-mode');
+  const startVersionEl = document.getElementById('start-version');
 
   const renderer = new THREE.WebGLRenderer({
     canvas: canvas,
@@ -107,10 +169,12 @@
   let hitTestSource = null;
   let lastHitPose = null;
   let reticle = null;
+  let activeRefSpaceType = '—';
+  let xrViewerPosChanges = 0;
 
   const _xrViewerPos = new THREE.Vector3();
   const _xrViewerQuat = new THREE.Quaternion();
-  const _xrViewerScale = new THREE.Vector3(1, 1, 1);
+  const _xrPrevViewerPos = new THREE.Vector3(Infinity, Infinity, Infinity);
   const _tmpM4 = new THREE.Matrix4();
 
   // Fallback state
@@ -124,7 +188,6 @@
     return new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
   }
 
-  // Unified helpers (XR-aware)
   function getCurrentEye() {
     if (xrMode) return _xrViewerPos.clone();
     return getEye();
@@ -135,7 +198,7 @@
   }
 
   /* ============================================================
-     Camera feed (fallback mode only)
+     Camera feed (fallback)
      ============================================================ */
   function updateVideoFit() {
     if (!videoEl.videoWidth || !videoEl.videoHeight) return;
@@ -177,15 +240,13 @@
   videoEl.addEventListener('canplay', updateVideoFit);
 
   /* ============================================================
-     Aim placement — окна создаются в направлении взгляда
-     В XR-режиме используется hit-test (реальная поверхность).
+     Aim placement
      ============================================================ */
   function getAimPlacement() {
     if (xrMode) {
       if (lastHitPose) {
         _tmpM4.fromArray(lastHitPose.transform.matrix);
         const pos = new THREE.Vector3().setFromMatrixPosition(_tmpM4);
-        // Ориентируем окно лицом к пользователю
         const toCam = _xrViewerPos.clone().sub(pos).normalize();
         return { pos, normal: toCam.clone().negate(), attached: true };
       }
@@ -785,63 +846,86 @@
   window.addEventListener('resize', resize);
 
   /* ============================================================
-     Start
+     HUD diagnostics
      ============================================================ */
-  let started = false, beginning = false, consumeNextTap = false;
+  let hudTimer = 0;
+  function updateHUD() {
+    if (!started) { hudEl.classList.remove('visible'); return; }
+    hudEl.classList.add('visible');
+    const pos = xrMode ? _xrViewerPos : getEye();
+    const moving = xrViewerPosChanges > 5;
+    const hitStatus = xrMode
+      ? (hitTestSource ? (lastHitPose ? 'HIT' : 'search') : 'n/a')
+      : 'n/a';
+    const modeStr = xrMode ? 'AR (6DoF)' : 'fallback (3DoF)';
+    const posCls = xrMode ? (moving ? 'good' : 'warn') : 'bad';
+    hudEl.innerHTML =
+      '<span class="' + (xrMode ? 'good' : 'bad') + '">' + modeStr + '</span>\n' +
+      'ref: ' + activeRefSpaceType + '\n' +
+      'hit: ' + hitStatus + '\n' +
+      'pos: <span class="' + posCls + '">' +
+        pos.x.toFixed(2) + ' ' + pos.y.toFixed(2) + ' ' + pos.z.toFixed(2) +
+      '</span>\n' +
+      'win: ' + windows.length + '  v' + VERSION;
+  }
 
-  async function begin() {
-    if (started || beginning) return;
-    beginning = true;
-
-    let ok = false;
-
-    // 1) Пробуем WebXR immersive-ar
-    if (navigator.xr) {
+  /* ============================================================
+     XR session setup
+     ============================================================ */
+  async function pickRefSpaceType(session) {
+    const types = ['local-floor', 'local', 'viewer'];
+    for (let i = 0; i < types.length; i++) {
       try {
-        const supported = await navigator.xr.isSessionSupported('immersive-ar');
-        if (supported) {
-          ok = await startWebXR();
-        }
+        await session.requestReferenceSpace(types[i]);
+        return types[i];
       } catch (e) {
-        console.warn('[xr] check failed:', e);
+        console.warn('[xr] refspace', types[i], 'недоступен:', e.message || e);
       }
     }
-
-    // 2) Иначе — фолбэк (camera + gyro)
-    if (!ok) {
-      await startFallback();
-    }
-
-    started = true;
-    startScreen.classList.add('hidden');
-    crosshair.classList.add('visible');
-    warmUpKeyboard();
-    resize();
+    return 'viewer';
   }
 
   async function startWebXR() {
+    if (!navigator.xr) return false;
+
+    let session;
     try {
-      renderer.xr.enabled = true;
-      xrSession = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['hit-test'],
-        optionalFeatures: ['dom-overlay', 'anchors'],
+      session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: [],
+        optionalFeatures: ['hit-test', 'dom-overlay', 'anchors', 'local-floor', 'local'],
         domOverlay: { root: document.body }
       });
     } catch (e) {
       console.warn('[xr] requestSession failed:', e);
-      renderer.xr.enabled = false;
+      startModeEl.innerHTML = '<span class="err">WebXR immersive-ar недоступен:</span><br>' + (e.name || e) +
+        '<br><span class="warn">Проверьте chrome://flags → WebXR AR</span>';
       return false;
     }
 
-    renderer.xr.setReferenceSpaceType('local');
-    await renderer.xr.setSession(xrSession);
+    xrSession = session;
 
-    // Hit-test source
+    // Выбираем лучший reference space
+    activeRefSpaceType = await pickRefSpaceType(session);
+    console.log('[xr] reference space:', activeRefSpaceType);
+
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType(activeRefSpaceType);
+
     try {
-      const viewerSpace = await xrSession.requestReferenceSpace('viewer');
-      hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+      await renderer.xr.setSession(session);
     } catch (e) {
-      console.warn('[xr] hit-test init failed:', e);
+      console.warn('[xr] setSession failed:', e);
+      try { session.end(); } catch (err) {}
+      xrSession = null;
+      return false;
+    }
+
+    // Hit-test
+    try {
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+    } catch (e) {
+      console.warn('[xr] hit-test недоступен:', e);
       hitTestSource = null;
     }
 
@@ -857,28 +941,32 @@
     reticle.visible = false;
     scene.add(reticle);
 
-    // Hide fallback video, make body transparent so browser passthrough shows
     videoEl.style.display = 'none';
     document.body.classList.add('xr-mode');
 
-    xrSession.addEventListener('select', onXRSelect);
-    xrSession.addEventListener('end', onXRSessionEnd);
+    session.addEventListener('select', onXRSelect);
+    session.addEventListener('end', onXRSessionEnd);
 
     xrMode = true;
     renderer.setAnimationLoop(xrRenderFrame);
     return true;
   }
 
-  async function startFallback() {
+  async function startFallback(xrReason) {
     await requestCamera();
-    // гироскоп включится при следующем touch/click
     tryEnableGyro();
-    // если через 2.5 с не получили orientation — включаем drag-look
     setTimeout(function () {
       if (!gotOrientation && !gyroOn) { gyroFailed = true; lookMode = true; }
     }, 2500);
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     renderer.setAnimationLoop(fallbackRenderFrame);
+
+    if (!xrReason) {
+      startModeEl.innerHTML =
+        '<span class="warn">WebXR AR недоступен на этом устройстве.</span><br>' +
+        'Окна будут закреплены в виртуальном пространстве, но НЕ в реальном мире — ' +
+        'при физическом перемещении они останутся на месте относительно вас.';
+    }
   }
 
   function onXRSessionEnd() {
@@ -887,14 +975,13 @@
     document.body.classList.remove('xr-mode');
     startScreen.classList.remove('hidden');
     crosshair.classList.remove('visible');
+    hudEl.classList.remove('visible');
     started = false;
     beginning = false;
-    // очистить окна? Оставим на будущее — просто отключим рендер.
   }
 
   function onXRSelect() {
     if (!started) return;
-    // Если навели на кнопку — сразу активируем её
     const found = getButtonUnderCrosshair();
     if (found) {
       found.btn.progress = 0;
@@ -904,15 +991,7 @@
     }
     if (mode) { mode = null; hideModeVisuals(); return; }
     if (editingWin) { commitEdit(); return; }
-    createWindowXR();
-  }
-
-  function createWindowXR() {
-    const placement = getAimPlacement();
-    const win = makeWindow('');
-    orientWindowToPlacement(win, placement);
-    scene.add(win.group);
-    windows.push(win);
+    createWindowCenter();
   }
 
   /* ============================================================
@@ -923,15 +1002,20 @@
     const refSpace = renderer.xr.getReferenceSpace();
     if (!refSpace) { renderer.render(scene, camera); return; }
 
-    // Обновляем позу зрителя (для рейкаста и размещения)
     const viewerPose = frame.getViewerPose(refSpace);
-    if (viewerPose && viewerPose.views.length) {
-      const view = viewerPose.views[0];
-      _tmpM4.fromArray(view.transform.matrix);
-      _tmpM4.decompose(_xrViewerPos, _xrViewerQuat, _xrViewerScale);
+    if (viewerPose) {
+      const tr = viewerPose.transform;
+      _xrViewerPos.set(tr.position.x, tr.position.y, tr.position.z);
+      _xrViewerQuat.set(tr.orientation.x, tr.orientation.y, tr.orientation.z, tr.orientation.w);
+
+      if (_xrPrevViewerPos.x === Infinity) {
+        _xrPrevViewerPos.copy(_xrViewerPos);
+      } else {
+        const d = _xrViewerPos.distanceTo(_xrPrevViewerPos);
+        if (d > 0.005) { xrViewerPosChanges++; _xrPrevViewerPos.copy(_xrViewerPos); }
+      }
     }
 
-    // Hit-test
     if (hitTestSource) {
       const results = frame.getHitTestResults(hitTestSource);
       let hasHit = false;
@@ -955,15 +1039,17 @@
       updateHover(dt);
       updateMode(dt);
       updateWindowVisibility();
+      updateHUD();
     }
 
     renderer.render(scene, camera);
   }
 
   /* ============================================================
-     Render — fallback (camera + gyro/drag)
+     Render — fallback
      ============================================================ */
   let lastTime = performance.now();
+  let fallbackHudAccum = 0;
   function fallbackRenderFrame(now) {
     const t = (typeof now === 'number') ? now : performance.now();
     const dt = Math.min(0.05, Math.max(0, (t - lastTime) / 1000));
@@ -978,15 +1064,72 @@
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
+      fallbackHudAccum += dt;
+      if (fallbackHudAccum > 0.2) { updateHUD(); fallbackHudAccum = 0; }
     }
 
     renderer.render(scene, camera);
   }
 
+  /* ============================================================
+     Start
+     ============================================================ */
+  let started = false, beginning = false, consumeNextTap = false;
+
+  async function begin() {
+    if (started || beginning) return;
+    beginning = true;
+
+    let ok = false;
+
+    if (navigator.xr) {
+      try {
+        const supported = await navigator.xr.isSessionSupported('immersive-ar');
+        if (supported) {
+          ok = await startWebXR();
+        } else {
+          startModeEl.innerHTML = '<span class="warn">immersive-ar не поддерживается браузером.</span>';
+        }
+      } catch (e) {
+        console.warn('[xr] isSessionSupported failed:', e);
+      }
+    } else {
+      startModeEl.innerHTML = '<span class="warn">navigator.xr отсутствует — WebXR не поддерживается.</span>';
+    }
+
+    if (!ok) {
+      await startFallback(true);
+    }
+
+    started = true;
+    startScreen.classList.add('hidden');
+    crosshair.classList.add('visible');
+    warmUpKeyboard();
+    resize();
+  }
+
+  // Показать статус поддержки XR ещё до старта
+  (async function probeXR() {
+    if (!navigator.xr) {
+      startModeEl.innerHTML = '<span class="warn">WebXR отсутствует</span>';
+      return;
+    }
+    try {
+      const supported = await navigator.xr.isSessionSupported('immersive-ar');
+      if (supported) {
+        startModeEl.innerHTML = '<span class="good" style="color:#7fff9a">WebXR AR доступен — окна будут закреплены в реальном мире.</span>';
+      } else {
+        startModeEl.innerHTML = '<span class="warn">immersive-ar не поддерживается — окна не будут привязаны к реальному миру.</span>';
+      }
+    } catch (e) {
+      startModeEl.innerHTML = '<span class="err">Не удалось проверить WebXR.</span>';
+    }
+  })();
+
   startScreen.addEventListener('pointerdown', begin);
 
   /* ============================================================
-     Canvas input (fallback only)
+     Canvas input (fallback)
      ============================================================ */
   let pointerInfo = null;
 
