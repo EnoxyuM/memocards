@@ -10,7 +10,7 @@
     margin: 0; padding: 0;
     width: 100%; height: 100%;
     overflow: hidden;
-    background: #05080b;
+    background: #050508;
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
   }
@@ -24,7 +24,7 @@
   #start-screen {
     position: fixed; inset: 0; z-index: 20;
     display: flex; align-items: center; justify-content: center;
-    background: radial-gradient(ellipse at center, #0a1118 0%, #04070a 72%);
+    background: #050508;
     color: #5ad0ff;
     font: 600 30px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     letter-spacing: 0.08em;
@@ -85,81 +85,41 @@
   const canvas = document.getElementById('pano-canvas');
   const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setClearColor(0x05080b, 1);
+  renderer.setClearColor(0x050508, 1);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 2000);
 
   /* ============================================================
-     Тёмное серо-чёрное окружение (только для рейкастов)
+     Монотонный тёмный фон. Сфера нужна только как мишень рейкаста.
      ============================================================ */
-  function generateDarkEnv() {
-    const W = 2048, H = 1024;
-    const cv = document.createElement('canvas');
-    cv.width = W; cv.height = H;
-    const ctx = cv.getContext('2d');
-
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0,    '#0b1117');
-    g.addColorStop(0.45, '#070b10');
-    g.addColorStop(0.55, '#05080c');
-    g.addColorStop(1,    '#030508');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.strokeStyle = 'rgba(90, 200, 255, 0.045)';
-    ctx.lineWidth = 1.5;
-    for (let x = 0; x <= W; x += 64) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-    }
-    for (let y = 0; y <= H; y += 64) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-
-    ctx.strokeStyle = 'rgba(90, 200, 255, 0.10)';
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
-
-    const tex = new THREE.CanvasTexture(cv);
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-    return tex;
-  }
-
   const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(500, 48, 32),
-    new THREE.MeshBasicMaterial({ map: generateDarkEnv(), side: THREE.BackSide })
+    new THREE.SphereGeometry(500, 32, 16),
+    new THREE.MeshBasicMaterial({ color: 0x050508, side: THREE.BackSide })
   );
   scene.add(sphere);
 
   /* ============================================================
-     Состояние
+     Константы окна/текстуры
      ============================================================ */
-  const windows = [];
-  let activeWindow = null;
-  let mode = null;            // { type:'move'|'resize', win, plant, progress, scaleT }
-  let started = false;
-  let lookMode = false;       // fallback: мышь/палец вместо гироскопа
+  const TEX_W = 512, TEX_H = 384;
+  const WIN_W = 140, WIN_H = 105;
+  const WINDOW_FONT = '500 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
 
   /* ============================================================
-     Raycast helpers
+     Кнопки на окне: справа налево close, move, resize, text, flip
      ============================================================ */
-  const raycaster = new THREE.Raycaster();
-  const CENTER_NDC = new THREE.Vector2(0, 0);
+  const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
+  const BTN_SIZE = 44, BTN_TOP = 12, BTN_RIGHT = 12, BTN_GAP = 4;
 
-  function aimSpherePoint() {
-    raycaster.setFromCamera(CENTER_NDC, camera);
-    const hits = raycaster.intersectObject(sphere, false);
-    return hits.length ? hits[0].point.clone() : null;
+  function buttonRect(index) {
+    const right = TEX_W - BTN_RIGHT - index * (BTN_SIZE + BTN_GAP);
+    return { x: right - BTN_SIZE, y: BTN_TOP, w: BTN_SIZE, h: BTN_SIZE };
   }
 
   /* ============================================================
-     Окна: отрисовка тёмного скина
+     Отрисовка лица окна (тёмный простой скин)
      ============================================================ */
-  const WIN_W = 96, WIN_H = 72;
-  const TEX_W = 512, TEX_H = 384;
-  const WINDOW_FONT = '500 38px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
-
   function wrapText(ctx, text, maxWidth) {
     const paragraphs = String(text).split('\n');
     const lines = [];
@@ -182,127 +142,195 @@
     return lines;
   }
 
-  function drawWindowFace(ctx, W, H, text, active) {
+  function drawButtonIcon(ctx, r, id, flipped) {
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    const rad = r.w / 2 - 2;
+
+    // лёгкая подложка
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(90, 208, 255, 0.08)';
+    ctx.fill();
+
+    ctx.strokeStyle = '#8fe4ff';
+    ctx.fillStyle = '#8fe4ff';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const isz = rad * 0.52;
+
+    if (id === 'close') {
+      ctx.beginPath();
+      ctx.moveTo(cx - isz, cy - isz);
+      ctx.lineTo(cx + isz, cy + isz);
+      ctx.moveTo(cx + isz, cy - isz);
+      ctx.lineTo(cx - isz, cy + isz);
+      ctx.stroke();
+    } else if (id === 'move') {
+      ctx.beginPath();
+      ctx.rect(cx - isz, cy - isz, isz * 2, isz * 2);
+      ctx.stroke();
+    } else if (id === 'resize') {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - isz * 1.05);
+      ctx.lineTo(cx + isz * 1.05, cy + isz * 0.9);
+      ctx.lineTo(cx - isz * 1.05, cy + isz * 0.9);
+      ctx.closePath();
+      ctx.stroke();
+    } else if (id === 'text') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, isz * 0.95, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (id === 'flip') {
+      const spikes = 5, outer = isz * 1.15, inner = isz * 0.48;
+      ctx.beginPath();
+      for (let i = 0; i < spikes * 2; i++) {
+        const rr = (i % 2 === 0) ? outer : inner;
+        const a = -Math.PI / 2 + i * Math.PI / spikes;
+        const x = cx + Math.cos(a) * rr;
+        const y = cy + Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      if (flipped) ctx.stroke(); else ctx.fill();
+    }
+  }
+
+  function drawWindowFace(ctx, W, H, text, flipped) {
     ctx.clearRect(0, 0, W, H);
 
-    // фон-стекло
-    const bg = ctx.createLinearGradient(0, 0, W, H);
-    bg.addColorStop(0,   '#0b141b');
-    bg.addColorStop(0.5, '#0c1a24');
-    bg.addColorStop(1,   '#071016');
-    ctx.fillStyle = bg;
+    // однотонный тёмный фон
+    ctx.fillStyle = '#0d0d11';
     ctx.fillRect(0, 0, W, H);
 
-    const sheen = ctx.createLinearGradient(0, 0, W, H);
-    sheen.addColorStop(0,    'rgba(90,208,255,0.10)');
-    sheen.addColorStop(0.45, 'rgba(90,208,255,0.00)');
-    sheen.addColorStop(1,    'rgba(90,208,255,0.06)');
-    ctx.fillStyle = sheen;
+    // лёгкая внутренняя подсветка по центру
+    const g = ctx.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, Math.max(W, H) * 0.7);
+    g.addColorStop(0, 'rgba(30, 42, 52, 0.30)');
+    g.addColorStop(1, 'rgba(5, 5, 8, 0.0)');
+    ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    // рама
-    const frame = active ? '#5ad0ff' : '#294553';
-    const soft  = active ? 'rgba(90,208,255,0.55)' : 'rgba(90,208,255,0.16)';
-
-    ctx.lineWidth = 12;
-    ctx.strokeStyle = frame;
-    ctx.strokeRect(6, 6, W - 12, H - 12);
-
+    // одна тонкая рамка
+    ctx.strokeStyle = 'rgba(90, 208, 255, 0.45)';
     ctx.lineWidth = 2;
-    ctx.strokeStyle = soft;
-    ctx.strokeRect(24, 24, W - 48, H - 48);
-
-    // верхняя акцентная полоса
-    ctx.fillStyle = active ? 'rgba(90,208,255,0.85)' : 'rgba(90,208,255,0.25)';
-    ctx.fillRect(32, 32, W - 64, 5);
-
-    // уголки
-    ctx.strokeStyle = active ? '#8fe4ff' : 'rgba(120,180,210,0.35)';
-    ctx.lineWidth = 5;
-    const c = 22, m = 20;
-    ctx.beginPath();
-    ctx.moveTo(m, m + c);           ctx.lineTo(m, m);           ctx.lineTo(m + c, m);
-    ctx.moveTo(W - m - c, m);       ctx.lineTo(W - m, m);       ctx.lineTo(W - m, m + c);
-    ctx.moveTo(W - m, H - m - c);   ctx.lineTo(W - m, H - m);   ctx.lineTo(W - m - c, H - m);
-    ctx.moveTo(m + c, H - m);       ctx.lineTo(m, H - m);       ctx.lineTo(m, H - m - c);
-    ctx.stroke();
+    ctx.strokeRect(1, 1, W - 2, H - 2);
 
     // текст
-    ctx.font = WINDOW_FONT;
-    const lines = wrapText(ctx, text || '', W - 100).slice(0, 5);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = active ? '#e9f8ff' : '#a9cbdb';
-    const lh = 46;
-    const startY = H / 2 + 6 - (lines.length - 1) * lh / 2;
-    for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], W / 2, startY + i * lh);
+    if (text) {
+      ctx.font = WINDOW_FONT;
+      ctx.fillStyle = '#c8d8e0';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const lines = wrapText(ctx, text, W - 90).slice(0, 4);
+      const lh = 40;
+      const startY = H / 2 + 10 - (lines.length - 1) * lh / 2;
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], W / 2, startY + i * lh);
+      }
+    }
+
+    // кнопки
+    for (let i = 0; i < BTN_IDS.length; i++) {
+      drawButtonIcon(ctx, buttonRect(i), BTN_IDS[i], flipped);
     }
   }
 
   /* ============================================================
-     Окна: создание/обновление
+     Окна
      ============================================================ */
-  function makeSide() {
+  const windows = [];
+
+  function makeWindow(text) {
+    const group = new THREE.Group();
+
     const cv = document.createElement('canvas');
     cv.width = TEX_W; cv.height = TEX_H;
     const ctx = cv.getContext('2d');
     const tex = new THREE.CanvasTexture(cv);
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.LinearFilter;
-    const mesh = new THREE.Mesh(
+
+    const face = new THREE.Mesh(
       new THREE.PlaneGeometry(WIN_W, WIN_H),
-      new THREE.MeshBasicMaterial({ map: tex, transparent: true })
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
     );
-    return { cv: cv, ctx: ctx, tex: tex, mesh: mesh };
-  }
-
-  function makeWindow(text) {
-    const group = new THREE.Group();
-    const inner = new THREE.Group();
-    group.add(inner);
-
-    const front = makeSide();
-    const back  = makeSide();
-
-    front.mesh.position.z = 0.35;
-    back.mesh.position.z  = -0.35;
-    back.mesh.rotation.y  = Math.PI;
-
-    inner.add(front.mesh);
-    inner.add(back.mesh);
+    group.add(face);
 
     const win = {
       group: group,
-      inner: inner,
-      front: front,
-      back: back,
-      frontText: text || '',
-      backText: '',
+      face: face,
+      ctx: ctx,
+      tex: tex,
+      textFront: text || '',
+      textBack: '',
       flipped: false,
-      active: false,
-      scale: 1
+      buttons: {}
     };
 
-    drawWindowFace(front.ctx, TEX_W, TEX_H, win.frontText, false);
-    drawWindowFace(back.ctx,  TEX_W, TEX_H, win.backText,  false);
-    front.tex.needsUpdate = true;
-    back.tex.needsUpdate = true;
+    for (let i = 0; i < BTN_IDS.length; i++) {
+      const id = BTN_IDS[i];
+      const r = buttonRect(i);
+      const lx = ((r.x + r.w / 2) / TEX_W - 0.5) * WIN_W;
+      const ly = (0.5 - (r.y + r.h / 2) / TEX_H) * WIN_H;
+      const rad = (r.w / 2 / TEX_W) * WIN_W;
 
+      const hit = new THREE.Mesh(
+        new THREE.CircleGeometry(rad * 1.45, 16),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      hit.position.set(lx, ly, 0.05);
+      group.add(hit);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(rad * 1.10, rad * 1.38, 28),
+        new THREE.MeshBasicMaterial({
+          color: 0x5ad0ff, transparent: true, opacity: 0.95,
+          side: THREE.DoubleSide, depthTest: false, depthWrite: false
+        })
+      );
+      ring.position.set(lx, ly, 0.12);
+      ring.renderOrder = 6;
+      ring.visible = false;
+      group.add(ring);
+
+      const prog = new THREE.Mesh(
+        new THREE.CircleGeometry(rad * 1.10, 28),
+        new THREE.MeshBasicMaterial({
+          color: 0x5ad0ff, transparent: true, opacity: 0.35,
+          side: THREE.DoubleSide, depthTest: false, depthWrite: false
+        })
+      );
+      prog.position.set(lx, ly, 0.10);
+      prog.renderOrder = 5;
+      prog.visible = false;
+      prog.scale.setScalar(0.0001);
+      group.add(prog);
+
+      win.buttons[id] = {
+        id: id,
+        hit: hit,
+        ring: ring,
+        prog: prog,
+        progress: 0,
+        armed: true
+      };
+    }
+
+    refreshWindow(win);
     return win;
   }
 
-  function refreshWindowTextures(win) {
-    drawWindowFace(win.front.ctx, TEX_W, TEX_H, win.frontText, win.active);
-    drawWindowFace(win.back.ctx,  TEX_W, TEX_H, win.backText,  win.active);
-    win.front.tex.needsUpdate = true;
-    win.back.tex.needsUpdate = true;
+  function refreshWindow(win) {
+    const text = win.flipped ? win.textBack : win.textFront;
+    drawWindowFace(win.ctx, TEX_W, TEX_H, text, win.flipped);
+    win.tex.needsUpdate = true;
   }
 
   function placeWindowAt(win, point) {
     win.group.position.copy(point).multiplyScalar(0.985);
     win.group.lookAt(0, 0, 0);
-    win.group.scale.setScalar(win.scale);
   }
 
   function createWindowAtScreen(clientX, clientY) {
@@ -319,245 +347,180 @@
     placeWindowAt(win, hits[0].point);
     scene.add(win.group);
     windows.push(win);
-    setActiveWindow(win);
   }
 
   function removeWindow(win) {
     scene.remove(win.group);
-    [win.front, win.back].forEach(function (side) {
-      side.mesh.geometry.dispose();
-      if (side.mesh.material.map) side.mesh.material.map.dispose();
-      side.mesh.material.dispose();
-      side.tex.dispose();
-    });
+
+    win.face.geometry.dispose();
+    if (win.face.material.map) win.face.material.map.dispose();
+    win.face.material.dispose();
+    win.tex.dispose();
+
+    for (const id in win.buttons) {
+      const b = win.buttons[id];
+      b.hit.geometry.dispose();
+      b.hit.material.dispose();
+      b.ring.geometry.dispose();
+      b.ring.material.dispose();
+      b.prog.geometry.dispose();
+      b.prog.material.dispose();
+    }
 
     const i = windows.indexOf(win);
     if (i !== -1) windows.splice(i, 1);
 
-    if (activeWindow === win) {
-      activeWindow = null;
-      if (windows.length) {
-        setActiveWindow(windows[windows.length - 1]);
-      } else {
-        updateStarButton();
-        updateButtonEnabled();
-      }
+    if (mode && mode.win === win) {
+      mode = null;
+      hideModeVisuals();
     }
-  }
-
-  function setActiveWindow(win) {
-    if (activeWindow === win) return;
-    const prev = activeWindow;
-    activeWindow = win;
-    if (prev) { prev.active = false; refreshWindowTextures(prev); }
-    if (win)  { win.active  = true;  refreshWindowTextures(win);  }
-    updateStarButton();
-    updateButtonEnabled();
+    if (hoveredBtn && hoveredBtn.win === win) hoveredBtn = null;
   }
 
   /* ============================================================
-     Кнопки (3D, в правом верхнем углу мира)
+     Raycast helpers
      ============================================================ */
-  const BTN_R      = 0.18;
-  const BTN_DIST   = 3.0;
-  const BTN_EL     = 20 * DEG;
-  const BTN_AZ     = [17, 8.5, 0, -8.5, -17].map(function (v) { return v * DEG; });
+  const raycaster = new THREE.Raycaster();
+  const CENTER_NDC = new THREE.Vector2(0, 0);
 
-  const BTN_DEFS = [
-    { id: 'close',  az: BTN_AZ[0] },
-    { id: 'move',   az: BTN_AZ[1] },
-    { id: 'resize', az: BTN_AZ[2] },
-    { id: 'text',   az: BTN_AZ[3] },
-    { id: 'flip',   az: BTN_AZ[4] }
-  ];
+  function aimSpherePoint() {
+    raycaster.setFromCamera(CENTER_NDC, camera);
+    const hits = raycaster.intersectObject(sphere, false);
+    return hits.length ? hits[0].point.clone() : null;
+  }
 
-  function drawButtonFace(btn, kind) {
-    const S = 256;
-    const ctx = btn.baseCtx;
-    ctx.clearRect(0, 0, S, S);
+  /* ============================================================
+     Ховер кнопок через перекрестие
+     ============================================================ */
+  let hoveredBtn = null;
 
-    ctx.beginPath();
-    ctx.arc(S / 2, S / 2, S / 2 - 8, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(7, 13, 19, 0.88)';
-    ctx.fill();
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = 'rgba(90, 208, 255, 0.85)';
-    ctx.stroke();
+  function getButtonUnderCrosshair() {
+    if (!windows.length) return null;
 
-    const cx = S / 2, cy = S / 2, r = S * 0.23;
-
-    ctx.strokeStyle = '#8fe4ff';
-    ctx.fillStyle = '#8fe4ff';
-    ctx.lineWidth = 14;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    if (kind === 'close') {
-      ctx.beginPath();
-      ctx.moveTo(cx - r * 0.62, cy - r * 0.62);
-      ctx.lineTo(cx + r * 0.62, cy + r * 0.62);
-      ctx.moveTo(cx + r * 0.62, cy - r * 0.62);
-      ctx.lineTo(cx - r * 0.62, cy + r * 0.62);
-      ctx.stroke();
-    } else if (kind === 'move') {
-      ctx.beginPath();
-      ctx.rect(cx - r * 0.62, cy - r * 0.62, r * 1.24, r * 1.24);
-      ctx.stroke();
-    } else if (kind === 'resize') {
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - r * 0.85);
-      ctx.lineTo(cx + r * 0.85, cy + r * 0.62);
-      ctx.lineTo(cx - r * 0.85, cy + r * 0.62);
-      ctx.closePath();
-      ctx.stroke();
-    } else if (kind === 'text') {
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.72, 0, Math.PI * 2);
-      ctx.stroke();
-    } else if (kind === 'flip-filled' || kind === 'flip-hollow') {
-      const spikes = 5, outer = r * 0.95, inner = r * 0.42;
-      ctx.beginPath();
-      for (let i = 0; i < spikes * 2; i++) {
-        const rad = (i % 2 === 0) ? outer : inner;
-        const a = -Math.PI / 2 + i * Math.PI / spikes;
-        const x = cx + Math.cos(a) * rad;
-        const y = cy + Math.sin(a) * rad;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    const hitsList = [];
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      for (const id in w.buttons) {
+        hitsList.push(w.buttons[id].hit);
       }
-      ctx.closePath();
-      if (kind === 'flip-filled') ctx.fill(); else ctx.stroke();
     }
 
-    btn.baseTex.needsUpdate = true;
+    raycaster.setFromCamera(CENTER_NDC, camera);
+    const hits = raycaster.intersectObjects(hitsList, false);
+    if (!hits.length) return null;
+
+    const obj = hits[0].object;
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      for (const id in w.buttons) {
+        if (w.buttons[id].hit === obj) {
+          return { win: w, btn: w.buttons[id] };
+        }
+      }
+    }
+    return null;
   }
 
-  function makeButton(def) {
-    const group = new THREE.Group();
-
-    const dir = new THREE.Vector3(
-      Math.sin(def.az) * Math.cos(BTN_EL),
-      Math.sin(BTN_EL),
-      -Math.cos(def.az) * Math.cos(BTN_EL)
-    );
-    group.position.copy(dir).multiplyScalar(BTN_DIST);
-    group.lookAt(0, 0, 0);
-
-    const baseCv = document.createElement('canvas');
-    baseCv.width = 256; baseCv.height = 256;
-    const baseCtx = baseCv.getContext('2d');
-    const baseTex = new THREE.CanvasTexture(baseCv);
-    baseTex.minFilter = THREE.LinearFilter;
-    baseTex.magFilter = THREE.LinearFilter;
-
-    const base = new THREE.Mesh(
-      new THREE.CircleGeometry(BTN_R, 48),
-      new THREE.MeshBasicMaterial({ map: baseTex, transparent: true, depthTest: false, depthWrite: false })
-    );
-    base.renderOrder = 30;
-    group.add(base);
-
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(BTN_R + 0.04, BTN_R + 0.07, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0x5ad0ff, transparent: true, opacity: 0.9,
-        side: THREE.DoubleSide, depthTest: false, depthWrite: false
-      })
-    );
-    ring.renderOrder = 31;
-    ring.visible = false;
-    group.add(ring);
-
-    const prog = new THREE.Mesh(
-      new THREE.CircleGeometry(BTN_R + 0.04, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0x5ad0ff, transparent: true, opacity: 0.35,
-        side: THREE.DoubleSide, depthTest: false, depthWrite: false
-      })
-    );
-    prog.renderOrder = 32;
-    prog.visible = false;
-    prog.scale.setScalar(0.0001);
-    group.add(prog);
-
-    const btn = {
-      def: def,
-      group: group,
-      base: base,
-      ring: ring,
-      prog: prog,
-      baseCv: baseCv,
-      baseCtx: baseCtx,
-      baseTex: baseTex,
-      progress: 0,
-      armed: true,
-      kind: def.id
-    };
-
-    drawButtonFace(btn, def.id === 'flip' ? 'flip-filled' : def.id);
-    return btn;
+  function clearAllButtonVisuals() {
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      for (const id in w.buttons) {
+        const b = w.buttons[id];
+        b.progress = 0;
+        b.armed = true;
+        b.ring.visible = false;
+        b.prog.visible = false;
+        b.prog.scale.setScalar(0.0001);
+      }
+    }
+    hoveredBtn = null;
   }
 
-  const buttons = BTN_DEFS.map(makeButton);
-  buttons.forEach(function (b) { scene.add(b.group); });
+  function updateHover(dt) {
+    if (mode) {
+      clearAllButtonVisuals();
+      return;
+    }
 
-  function updateStarButton() {
-    const b = buttons.find(function (x) { return x.kind === 'flip'; });
-    if (!b) return;
-    const flipped = activeWindow ? activeWindow.flipped : false;
-    drawButtonFace(b, flipped ? 'flip-hollow' : 'flip-filled');
-  }
+    const found = getButtonUnderCrosshair();
 
-  function updateButtonEnabled() {
-    const on = !!activeWindow;
-    for (let i = 0; i < buttons.length; i++) {
-      const b = buttons[i];
-      b.base.material.transparent = true;
-      b.base.material.opacity = on ? 1 : 0.28;
+    // сброс всех, кроме найденной
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      for (const id in w.buttons) {
+        const b = w.buttons[id];
+        const isFound = found && found.btn === b;
+        if (!isFound) {
+          b.progress = 0;
+          b.armed = true;
+          b.ring.visible = false;
+          b.prog.visible = false;
+          b.prog.scale.setScalar(0.0001);
+        }
+      }
+    }
+
+    hoveredBtn = found || null;
+    if (!found) return;
+
+    const b = found.btn;
+    b.ring.visible = true;
+
+    if (b.armed) {
+      b.progress += dt;
+      if (b.progress >= 1) {
+        b.progress = 0;
+        b.armed = false;
+        fireButton(found.win, b.id);
+      }
+    }
+
+    if (b.progress > 0.001) {
+      b.prog.visible = true;
+      b.prog.scale.setScalar(Math.max(0.0001, b.progress));
+    } else {
+      b.prog.visible = false;
     }
   }
 
   /* ============================================================
      Действия кнопок
      ============================================================ */
-  function fireButton(btn) {
-    const win = activeWindow;
-    if (!win) return;
-
-    if (btn.kind === 'close') {
+  function fireButton(win, id) {
+    if (id === 'close') {
       removeWindow(win);
-    } else if (btn.kind === 'move') {
+    } else if (id === 'move') {
       startMode('move', win);
-    } else if (btn.kind === 'resize') {
+    } else if (id === 'resize') {
       startMode('resize', win);
-    } else if (btn.kind === 'text') {
-      editWindowText(win);
-    } else if (btn.kind === 'flip') {
+    } else if (id === 'text') {
+      editText(win);
+    } else if (id === 'flip') {
       win.flipped = !win.flipped;
-      win.inner.rotation.y = win.flipped ? Math.PI : 0;
-      refreshWindowTextures(win);
-      updateStarButton();
+      refreshWindow(win);
     }
   }
 
-  function editWindowText(win) {
-    const current = win.flipped ? win.backText : win.frontText;
+  function editText(win) {
+    const current = win.flipped ? win.textBack : win.textFront;
     const value = window.prompt('Window text:', current);
     if (value === null) return;
-    if (win.flipped) win.backText = value;
-    else win.frontText = value;
-    refreshWindowTextures(win);
+    if (win.flipped) win.textBack = value;
+    else win.textFront = value;
+    refreshWindow(win);
   }
 
   /* ============================================================
-     Режимы move / resize (кружок у перекрестия, удержание 1 сек)
+     Режимы move / resize через перекрестие
      ============================================================ */
-  const MODE_TOLERANCE = 6 * DEG;
-  const MODE_DURATION  = 1.0;
+  let mode = null;
+  const MODE_TOL = 6 * DEG;
+  const MODE_DURATION = 1.0;
 
   const modeRing = new THREE.Mesh(
     new THREE.RingGeometry(0.93, 1.0, 64),
     new THREE.MeshBasicMaterial({
-      color: 0x5ad0ff, transparent: true, opacity: 0.9,
+      color: 0x5ad0ff, transparent: true, opacity: 0.95,
       side: THREE.DoubleSide, depthTest: false, depthWrite: false
     })
   );
@@ -576,25 +539,43 @@
   modeFill.visible = false;
   scene.add(modeFill);
 
+  function hideModeVisuals() {
+    modeRing.visible = false;
+    modeFill.visible = false;
+  }
+
   function startMode(type, win) {
     const aim = aimSpherePoint();
     if (!aim) return;
+
+    // сброс ховера кнопок
+    clearAllButtonVisuals();
+
     mode = {
       type: type,
       win: win,
-      plant: aim,
+      plant: aim.clone(),
       progress: 0,
-      scaleT: 0
+      scaleT: 0,
+      baseScale: win.group.scale.x || 1
     };
-    updateModeRingVisuals();
+
+    if (type === 'move') {
+      win.group.position.copy(aim).multiplyScalar(0.985);
+      win.group.lookAt(0, 0, 0);
+    } else if (type === 'resize') {
+      mode.baseScale = win.group.scale.x || 1;
+    }
+
+    updateModeVisuals();
   }
 
-  function updateModeRingVisuals() {
-    if (!mode) { modeRing.visible = false; modeFill.visible = false; return; }
+  function updateModeVisuals() {
+    if (!mode) { hideModeVisuals(); return; }
 
     const p = mode.plant.clone().multiplyScalar(0.965);
     const dist = p.length();
-    const R = dist * Math.tan(MODE_TOLERANCE);
+    const R = dist * Math.tan(MODE_TOL);
 
     modeRing.position.copy(p);
     modeRing.lookAt(0, 0, 0);
@@ -602,7 +583,7 @@
     modeRing.visible = true;
 
     const pr = Math.max(0, Math.min(1, mode.progress / MODE_DURATION));
-    modeFill.position.copy(p).multiplyScalar(0.998);
+    modeFill.position.copy(mode.plant).multiplyScalar(0.963);
     modeFill.lookAt(0, 0, 0);
     modeFill.scale.setScalar(Math.max(0.0001, R * pr));
     modeFill.visible = pr > 0.001;
@@ -618,7 +599,9 @@
     const aimDir = aim.clone().normalize();
     const ang = Math.acos(Math.max(-1, Math.min(1, plantDir.dot(aimDir))));
 
-    if (ang > MODE_TOLERANCE) {
+    const moving = ang > MODE_TOL;
+
+    if (moving) {
       mode.plant.copy(aim);
       mode.progress = 0;
     } else {
@@ -626,105 +609,26 @@
     }
 
     if (mode.type === 'move') {
-      placeWindowAt(mode.win, aim);
+      mode.win.group.position.copy(aim).multiplyScalar(0.985);
+      mode.win.group.lookAt(0, 0, 0);
     } else if (mode.type === 'resize') {
-      if (mode.progress === 0) mode.scaleT += dt;
-      const base = 1.35 + 0.85 * Math.sin(mode.scaleT * 1.7);
-      mode.win.scale = Math.max(0.55, Math.min(2.2, base));
-      mode.win.group.scale.setScalar(mode.win.scale);
+      if (moving) {
+        mode.scaleT += dt;
+        const s = mode.baseScale + Math.sin(mode.scaleT * 4) * 0.7;
+        mode.win.group.scale.setScalar(Math.max(0.4, Math.min(2.5, s)));
+      }
     }
 
-    updateModeRingVisuals();
+    updateModeVisuals();
 
     if (mode.progress >= MODE_DURATION) {
       mode = null;
-      modeRing.visible = false;
-      modeFill.visible = false;
+      hideModeVisuals();
     }
   }
 
   /* ============================================================
-     Наведение перекрестия на кнопки (gaze)
-     ============================================================ */
-  const _camDir = new THREE.Vector3();
-
-  function updateButtons(dt) {
-    camera.getWorldDirection(_camDir);
-
-    const enabled = !!activeWindow;
-    const START_ANG = 3.4;
-    const KEEP_ANG  = 4.9;
-
-    for (let i = 0; i < buttons.length; i++) {
-      const btn = buttons[i];
-
-      const dir = btn.group.position.clone().normalize();
-      const ang = Math.acos(Math.max(-1, Math.min(1, _camDir.dot(dir)))) * 180 / Math.PI;
-
-      if (!enabled || mode) {
-        btn.progress = 0;
-        btn.armed = true;
-        btn.ring.visible = false;
-        btn.prog.visible = false;
-        btn.prog.scale.setScalar(0.0001);
-        continue;
-      }
-
-      if (!btn.armed && ang > 8) btn.armed = true;
-
-      if (btn.progress > 0) {
-        if (ang > KEEP_ANG) {
-          btn.progress = 0;
-        } else {
-          btn.progress += dt;
-          if (btn.progress >= 1) {
-            btn.progress = 0;
-            btn.armed = false;
-            fireButton(btn);
-          }
-        }
-      } else {
-        if (btn.armed && ang < START_ANG) {
-          btn.progress = 0.0001;
-        }
-      }
-
-      const show = btn.progress > 0;
-      btn.ring.visible = show;
-      btn.prog.visible = show;
-      btn.prog.scale.setScalar(show ? Math.max(0.0001, btn.progress) : 0.0001);
-    }
-  }
-
-  /* ============================================================
-     Выбор активного окна взглядом
-     ============================================================ */
-  const _meshList = [];
-
-  function updateWindowSelection() {
-    if (mode) return;
-    _meshList.length = 0;
-    for (let i = 0; i < windows.length; i++) {
-      _meshList.push(windows[i].front.mesh, windows[i].back.mesh);
-    }
-    if (!_meshList.length) return;
-
-    raycaster.setFromCamera(CENTER_NDC, camera);
-    const hits = raycaster.intersectObjects(_meshList, false);
-    if (!hits.length) return;
-
-    const obj = hits[0].object;
-    for (let i = 0; i < windows.length; i++) {
-      const w = windows[i];
-      if (w.front.mesh === obj || w.back.mesh === obj) {
-        if (w !== activeWindow) setActiveWindow(w);
-        return;
-      }
-    }
-  }
-
-  /* ============================================================
-     Гироскоп (как в оригинале)
+     Гироскоп
      ============================================================ */
   let gyroOn = false;
   let gyroFailed = false;
@@ -756,9 +660,11 @@
         .then(function (p) {
           requestInFlight = false;
           if (p === 'granted') gyroOn = true;
+          else gyroFailed = true;
         })
         .catch(function () {
           requestInFlight = false;
+          gyroFailed = true;
         });
     } else {
       gyroOn = true;
@@ -789,8 +695,9 @@
   }
 
   /* ============================================================
-     Fallback: мышь/палец, если гироскоп не пришёл
+     Fallback: мышь/палец, если гироскоп недоступен
      ============================================================ */
+  let lookMode = false;
   let lookYaw = 0, lookPitch = 0;
   const _lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
@@ -817,10 +724,12 @@
   });
 
   /* ============================================================
-     Ввод: старт + тап-создание окна + drag-look (fallback)
+     Ввод
      ============================================================ */
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
+
+  let started = false;
 
   function begin() {
     if (started) return;
@@ -830,7 +739,7 @@
     tryEnableGyro();
 
     setTimeout(function () {
-      if (!gotOrientation) {
+      if (!gotOrientation && !gyroOn) {
         gyroOn = false;
         gyroFailed = true;
         lookMode = true;
@@ -864,7 +773,7 @@
     pointerInfo.lastY = e.clientY;
     pointerInfo.moved += Math.abs(dx) + Math.abs(dy);
 
-    if (lookMode) {
+    if (lookMode && !mode) {
       lookYaw   -= dx * 0.0045;
       lookPitch -= dy * 0.0045;
       lookPitch = Math.max(-1.25, Math.min(1.25, lookPitch));
@@ -890,7 +799,7 @@
   });
 
   /* ============================================================
-     Рендер
+     Рендер-цикл
      ============================================================ */
   let lastTime = performance.now();
 
@@ -905,8 +814,7 @@
     else if (lookMode) applyLook();
 
     if (started) {
-      updateWindowSelection();
-      updateButtons(dt);
+      updateHover(dt);
       updateMode(dt);
     }
 
@@ -916,9 +824,6 @@
   /* ============================================================
      Старт
      ============================================================ */
-  updateButtonEnabled();
-  updateStarButton();
-
   resize();
   setTimeout(resize, 50);
   setTimeout(resize, 200);
