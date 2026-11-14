@@ -15,6 +15,8 @@
     user-select: none; -webkit-user-select: none;
     touch-action: none;
   }
+  body.xr-mode { background: transparent; }
+
   #camera-feed {
     position: fixed; inset: 0;
     width: 100%; height: 100%;
@@ -29,6 +31,7 @@
     display: block; width: 100%; height: 100%;
     z-index: 1;
     touch-action: none;
+    background: transparent;
   }
   #start-screen {
     position: fixed; inset: 0; z-index: 20;
@@ -97,15 +100,48 @@
   const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2000);
 
   /* ============================================================
-     Camera feed
+     Global AR state
+     ============================================================ */
+  let xrMode = false;
+  let xrSession = null;
+  let hitTestSource = null;
+  let lastHitPose = null;
+  let reticle = null;
+
+  const _xrViewerPos = new THREE.Vector3();
+  const _xrViewerQuat = new THREE.Quaternion();
+  const _xrViewerScale = new THREE.Vector3(1, 1, 1);
+  const _tmpM4 = new THREE.Matrix4();
+
+  // Fallback state
+  const EYE_HEIGHT = 1.55;
+  const REACH = 6;
+  const playerPos = new THREE.Vector3(0, 0, 0);
+
+  const _camDir = new THREE.Vector3();
+  function getCamDir() { camera.getWorldDirection(_camDir); return _camDir; }
+  function getEye() {
+    return new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+  }
+
+  // Unified helpers (XR-aware)
+  function getCurrentEye() {
+    if (xrMode) return _xrViewerPos.clone();
+    return getEye();
+  }
+  function getCurrentDir() {
+    if (xrMode) return new THREE.Vector3(0, 0, -1).applyQuaternion(_xrViewerQuat).normalize();
+    return getCamDir().clone();
+  }
+
+  /* ============================================================
+     Camera feed (fallback mode only)
      ============================================================ */
   function updateVideoFit() {
     if (!videoEl.videoWidth || !videoEl.videoHeight) return;
     const va = videoEl.videoWidth / videoEl.videoHeight;
     const sa = window.innerWidth / window.innerHeight;
     const ratio = Math.max(va / sa, sa / va);
-    // Если пропорции сильно расходятся — показываем полный кадр (без зума).
-    // Если близки — заполняем экран.
     videoEl.style.objectFit = ratio > 1.5 ? 'contain' : 'cover';
   }
 
@@ -116,31 +152,9 @@
     }
     const sa = window.innerWidth / window.innerHeight;
     const tries = [
-      {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          aspectRatio: { ideal: sa }
-        },
-        audio: false
-      },
-      {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        audio: false
-      },
-      {
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      },
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, aspectRatio: { ideal: sa } }, audio: false },
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
       { video: { facingMode: 'environment' }, audio: false },
       { video: true, audio: false }
     ];
@@ -163,24 +177,22 @@
   videoEl.addEventListener('canplay', updateVideoFit);
 
   /* ============================================================
-     Player — стоит на месте, только осматривается
-     ============================================================ */
-  const EYE_HEIGHT = 1.55;
-  const REACH = 6;
-
-  const playerPos = new THREE.Vector3(0, 0, 0);
-
-  const _camDir = new THREE.Vector3();
-  function getCamDir() { camera.getWorldDirection(_camDir); return _camDir; }
-
-  function getEye() {
-    return new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
-  }
-
-  /* ============================================================
      Aim placement — окна создаются в направлении взгляда
+     В XR-режиме используется hit-test (реальная поверхность).
      ============================================================ */
   function getAimPlacement() {
+    if (xrMode) {
+      if (lastHitPose) {
+        _tmpM4.fromArray(lastHitPose.transform.matrix);
+        const pos = new THREE.Vector3().setFromMatrixPosition(_tmpM4);
+        // Ориентируем окно лицом к пользователю
+        const toCam = _xrViewerPos.clone().sub(pos).normalize();
+        return { pos, normal: toCam.clone().negate(), attached: true };
+      }
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(_xrViewerQuat).normalize();
+      const pos = _xrViewerPos.clone().add(dir.clone().multiplyScalar(2));
+      return { pos, normal: dir.clone().negate(), attached: false };
+    }
     const eye = getEye();
     const dir = getCamDir().clone();
     const pos = eye.clone().add(dir.clone().multiplyScalar(REACH));
@@ -386,9 +398,7 @@
         placement.pos.z + n.z
       );
     } else {
-      // Окно "смотрит" на точку, откуда его повесили. Позиция и поворот
-      // фиксируются один раз — дальше окно висит в мире и не двигается.
-      const eye = getEye();
+      const eye = getCurrentEye();
       win.group.lookAt(eye);
     }
   }
@@ -420,7 +430,7 @@
   }
 
   function updateWindowVisibility() {
-    const eye = getEye();
+    const eye = getCurrentEye();
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
       w.group.visible = w.group.position.distanceTo(eye) <= MAX_WIN_DIST;
@@ -428,10 +438,19 @@
   }
 
   /* ============================================================
-     Hover
+     Hover / Raycasting
      ============================================================ */
   const raycaster = new THREE.Raycaster();
   const CENTER_NDC = new THREE.Vector2(0, 0);
+
+  function setRayFromCenter() {
+    if (xrMode) {
+      raycaster.ray.origin.copy(_xrViewerPos);
+      raycaster.ray.direction.set(0, 0, -1).applyQuaternion(_xrViewerQuat).normalize();
+    } else {
+      raycaster.setFromCamera(CENTER_NDC, camera);
+    }
+  }
 
   function getButtonUnderCrosshair() {
     if (!windows.length) return null;
@@ -442,7 +461,7 @@
       for (const id in w.buttons) hitsList.push(w.buttons[id].hit);
     }
     if (!hitsList.length) return null;
-    raycaster.setFromCamera(CENTER_NDC, camera);
+    setRayFromCenter();
     const hits = raycaster.intersectObjects(hitsList, false);
     if (!hits.length) return null;
     const obj = hits[0].object;
@@ -526,8 +545,8 @@
   function hideModeVisuals() { modeRing.visible = false; modeFill.visible = false; }
 
   function startMode(type, win) {
-    const dir = getCamDir().clone();
-    const eye = getEye();
+    const dir = getCurrentDir();
+    const eye = getCurrentEye();
     clearAllButtonVisuals();
     mode = {
       type, win,
@@ -545,7 +564,7 @@
   function updateModeVisuals(placement) {
     if (!mode) { hideModeVisuals(); return; }
     if (!placement) placement = getAimPlacement();
-    const eye = getEye();
+    const eye = getCurrentEye();
     const distToAim = placement.pos.distanceTo(eye);
     const R = Math.max(0.03, distToAim * Math.tan(MODE_TOL));
 
@@ -564,8 +583,8 @@
   function updateMode(dt) {
     if (!mode) return;
 
-    const eye = getEye();
-    const dir = getCamDir().clone();
+    const eye = getCurrentEye();
+    const dir = getCurrentDir();
     const placement = getAimPlacement();
 
     const aimAng = Math.acos(Math.max(-1, Math.min(1, mode.plantDir.dot(dir))));
@@ -694,7 +713,7 @@
   }
 
   /* ============================================================
-     Gyro / fallback
+     Gyro / fallback orientation
      ============================================================ */
   let gyroOn = false, gyroFailed = false, requestInFlight = false, gotOrientation = false;
   const dev = { alpha: 0, beta: 0, gamma: 0 };
@@ -716,8 +735,6 @@
         .catch(function () { requestInFlight = false; gyroFailed = true; });
     } else gyroOn = true;
   }
-  document.addEventListener('touchstart', tryEnableGyro, { passive: true });
-  document.addEventListener('click', tryEnableGyro);
 
   const zee = new THREE.Vector3(0, 0, 1);
   const _euler = new THREE.Euler();
@@ -741,6 +758,7 @@
      Resize
      ============================================================ */
   function resize() {
+    if (renderer.xr.isPresenting) return;
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
     if (w < 10) w = window.innerWidth;
@@ -758,15 +776,13 @@
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
 
-  /* ============================================================
-     Orientation
-     ============================================================ */
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
     setTimeout(resize, 50);
     setTimeout(resize, 250);
     setTimeout(updateVideoFit, 300);
   });
+  window.addEventListener('resize', resize);
 
   /* ============================================================
      Start
@@ -777,32 +793,205 @@
     if (started || beginning) return;
     beginning = true;
 
-    // Запрашиваем камеру (системный диалог)
-    try { await requestCamera(); } catch (e) {}
+    let ok = false;
+
+    // 1) Пробуем WebXR immersive-ar
+    if (navigator.xr) {
+      try {
+        const supported = await navigator.xr.isSessionSupported('immersive-ar');
+        if (supported) {
+          ok = await startWebXR();
+        }
+      } catch (e) {
+        console.warn('[xr] check failed:', e);
+      }
+    }
+
+    // 2) Иначе — фолбэк (camera + gyro)
+    if (!ok) {
+      await startFallback();
+    }
 
     started = true;
     startScreen.classList.add('hidden');
     crosshair.classList.add('visible');
     warmUpKeyboard();
+    resize();
+  }
+
+  async function startWebXR() {
+    try {
+      renderer.xr.enabled = true;
+      xrSession = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test'],
+        optionalFeatures: ['dom-overlay', 'anchors'],
+        domOverlay: { root: document.body }
+      });
+    } catch (e) {
+      console.warn('[xr] requestSession failed:', e);
+      renderer.xr.enabled = false;
+      return false;
+    }
+
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(xrSession);
+
+    // Hit-test source
+    try {
+      const viewerSpace = await xrSession.requestReferenceSpace('viewer');
+      hitTestSource = await xrSession.requestHitTestSource({ space: viewerSpace });
+    } catch (e) {
+      console.warn('[xr] hit-test init failed:', e);
+      hitTestSource = null;
+    }
+
+    // Reticle
+    const rg = new THREE.RingGeometry(0.08, 0.11, 32);
+    rg.rotateX(-Math.PI / 2);
+    reticle = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({
+      color: 0x5ad0ff, transparent: true, opacity: 0.9,
+      side: THREE.DoubleSide, depthTest: false, depthWrite: false
+    }));
+    reticle.matrixAutoUpdate = false;
+    reticle.renderOrder = 50;
+    reticle.visible = false;
+    scene.add(reticle);
+
+    // Hide fallback video, make body transparent so browser passthrough shows
+    videoEl.style.display = 'none';
+    document.body.classList.add('xr-mode');
+
+    xrSession.addEventListener('select', onXRSelect);
+    xrSession.addEventListener('end', onXRSessionEnd);
+
+    xrMode = true;
+    renderer.setAnimationLoop(xrRenderFrame);
+    return true;
+  }
+
+  async function startFallback() {
+    await requestCamera();
+    // гироскоп включится при следующем touch/click
     tryEnableGyro();
+    // если через 2.5 с не получили orientation — включаем drag-look
+    setTimeout(function () {
+      if (!gotOrientation && !gyroOn) { gyroFailed = true; lookMode = true; }
+    }, 2500);
+    camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    renderer.setAnimationLoop(fallbackRenderFrame);
+  }
+
+  function onXRSessionEnd() {
+    xrMode = false;
+    renderer.setAnimationLoop(null);
+    document.body.classList.remove('xr-mode');
+    startScreen.classList.remove('hidden');
+    crosshair.classList.remove('visible');
+    started = false;
+    beginning = false;
+    // очистить окна? Оставим на будущее — просто отключим рендер.
+  }
+
+  function onXRSelect() {
+    if (!started) return;
+    // Если навели на кнопку — сразу активируем её
+    const found = getButtonUnderCrosshair();
+    if (found) {
+      found.btn.progress = 0;
+      found.btn.armed = true;
+      fireButton(found.win, found.id);
+      return;
+    }
+    if (mode) { mode = null; hideModeVisuals(); return; }
+    if (editingWin) { commitEdit(); return; }
+    createWindowXR();
+  }
+
+  function createWindowXR() {
+    const placement = getAimPlacement();
+    const win = makeWindow('');
+    orientWindowToPlacement(win, placement);
+    scene.add(win.group);
+    windows.push(win);
+  }
+
+  /* ============================================================
+     Render — XR
+     ============================================================ */
+  function xrRenderFrame(t, frame) {
+    if (!frame) return;
+    const refSpace = renderer.xr.getReferenceSpace();
+    if (!refSpace) { renderer.render(scene, camera); return; }
+
+    // Обновляем позу зрителя (для рейкаста и размещения)
+    const viewerPose = frame.getViewerPose(refSpace);
+    if (viewerPose && viewerPose.views.length) {
+      const view = viewerPose.views[0];
+      _tmpM4.fromArray(view.transform.matrix);
+      _tmpM4.decompose(_xrViewerPos, _xrViewerQuat, _xrViewerScale);
+    }
+
+    // Hit-test
+    if (hitTestSource) {
+      const results = frame.getHitTestResults(hitTestSource);
+      let hasHit = false;
+      if (results.length > 0) {
+        const pose = results[0].getPose(refSpace);
+        if (pose) {
+          lastHitPose = pose;
+          reticle.matrix.fromArray(pose.transform.matrix);
+          reticle.visible = true;
+          hasHit = true;
+        }
+      }
+      if (!hasHit) {
+        lastHitPose = null;
+        reticle.visible = false;
+      }
+    }
+
+    if (started) {
+      const dt = 1 / 60;
+      updateHover(dt);
+      updateMode(dt);
+      updateWindowVisibility();
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  /* ============================================================
+     Render — fallback (camera + gyro/drag)
+     ============================================================ */
+  let lastTime = performance.now();
+  function fallbackRenderFrame(now) {
+    const t = (typeof now === 'number') ? now : performance.now();
+    const dt = Math.min(0.05, Math.max(0, (t - lastTime) / 1000));
+    lastTime = t;
+
+    if (gyroOn) applyGyro();
+    else if (lookMode) applyLook();
 
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
 
-    setTimeout(function () {
-      if (!gotOrientation && !gyroOn) { gyroOn = false; gyroFailed = true; lookMode = true; }
-    }, 2500);
+    if (started) {
+      updateWindowVisibility();
+      updateHover(dt);
+      updateMode(dt);
+    }
+
+    renderer.render(scene, camera);
   }
+
   startScreen.addEventListener('pointerdown', begin);
 
-  window.addEventListener('resize', resize);
-
   /* ============================================================
-     Canvas input (look + tap to place window)
+     Canvas input (fallback only)
      ============================================================ */
   let pointerInfo = null;
 
   canvas.addEventListener('pointerdown', function (e) {
-    if (!started) return;
+    if (!started || xrMode) return;
     if (editingWin) { commitEdit(); consumeNextTap = true; return; }
     pointerInfo = {
       id: e.pointerId, lastX: e.clientX, lastY: e.clientY,
@@ -829,7 +1018,7 @@
     if (!pointerInfo || e.pointerId !== pointerInfo.id) { pointerInfo = null; return; }
     const info = pointerInfo;
     pointerInfo = null;
-    if (!started) return;
+    if (!started || xrMode) return;
     if (performance.now() - lastEditEnd < 300) return;
     if (info.moved < 12 && performance.now() - info.t < 700) {
       if (mode) { mode = null; hideModeVisuals(); }
@@ -839,36 +1028,12 @@
   canvas.addEventListener('pointercancel', function () { pointerInfo = null; });
 
   /* ============================================================
-     Render loop
+     Boot
      ============================================================ */
-  let lastTime = performance.now();
-  function render(now) {
-    requestAnimationFrame(render);
-    const t = (typeof now === 'number') ? now : performance.now();
-    const dt = Math.min(0.05, Math.max(0, (t - lastTime) / 1000));
-    lastTime = t;
-
-    if (gyroOn) applyGyro();
-    else if (lookMode) applyLook();
-
-    if (started) {
-      // Позиция камеры фиксирована — игрок стоит на месте, только осматривается.
-      camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
-      updateWindowVisibility();
-      updateHover(dt);
-      updateMode(dt);
-    } else {
-      camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
-    }
-
-    renderer.render(scene, camera);
-  }
-
   resize();
   setTimeout(resize, 50);
   setTimeout(resize, 200);
   setTimeout(resize, 800);
-  requestAnimationFrame(render);
 })();
 </script>
 </body>
