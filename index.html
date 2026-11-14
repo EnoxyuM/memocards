@@ -37,10 +37,32 @@
     box-shadow: 0 0 6px rgba(90, 208, 255, 0.9); border-radius: 1px;
   }
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
-  #crosshair::after  { top: 10px; left: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
+
+  #fps-counter {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+    z-index: 25;
+    color: #5ad0ff;
+    font: 600 12px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    background: rgba(5, 8, 12, 0.78);
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(90, 208, 255, 0.4);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    min-width: 68px;
+    text-align: center;
+    letter-spacing: 0.03em;
+  }
+  #fps-counter.visible { opacity: 1; }
+
   #joystick {
-    position: fixed; left: 24px; bottom: 24px;
+    position: fixed;
+    left: calc(24px + env(safe-area-inset-left, 0px));
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     width: 130px; height: 130px; border-radius: 50%;
     background: rgba(90, 208, 255, 0.08);
     border: 2px solid rgba(90, 208, 255, 0.5);
@@ -65,14 +87,26 @@
   }
   .action-btn.active { display: flex; }
   .action-btn:active { background: rgba(90, 208, 255, 0.35); }
-  #btn-build   { right: 24px; bottom: 102px; }
-  #btn-destroy { right: 102px; bottom: 102px; }
-  #btn-jump    { right: 24px; bottom: 24px; width: 84px; height: 84px; font-size: 13px; }
+
+  #btn-build {
+    right: calc(24px + env(safe-area-inset-right, 0px));
+    bottom: calc(102px + env(safe-area-inset-bottom, 0px));
+  }
+  #btn-destroy {
+    right: calc(102px + env(safe-area-inset-right, 0px));
+    bottom: calc(102px + env(safe-area-inset-bottom, 0px));
+  }
+  #btn-jump {
+    right: calc(24px + env(safe-area-inset-right, 0px));
+    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    width: 84px; height: 84px; font-size: 13px;
+  }
 </style>
 </head>
 <body>
 <canvas id="pano-canvas"></canvas>
 <div id="crosshair"></div>
+<div id="fps-counter">-- FPS</div>
 <div id="start-screen">Tap to Start.</div>
 <div id="joystick"><div id="joystick-knob"></div></div>
 <div id="btn-build" class="action-btn">Build</div>
@@ -398,8 +432,8 @@
   const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
   const BTN_SIZE = 64, BTN_TOP = 8, BTN_RIGHT = 8, BTN_GAP = 3;
 
-  // Все кнопочные меши (hit / prog / ring) на одном z — 1% ширины окна вперёд.
-  const BTN_Z = 0.01;
+  // Все кнопочные меши (hit / prog / ring) на одном z — 0.1% ширины окна вперёд.
+  const BTN_Z = 0.001;
 
   function buttonRect(index) {
     const right = TEX_W - BTN_RIGHT - index * (BTN_SIZE + BTN_GAP);
@@ -507,8 +541,8 @@
     const tex = new THREE.CanvasTexture(cv);
     tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
 
-    // Лицо окна. polygonOffset отодвигает его чуть вглубь по z-buffer,
-    // чтобы кнопочные меши впереди гарантированно проходили depth test.
+    // Полигональный offset отодвигает лицо чуть вглубь, чтобы кнопки
+    // на BTN_Z=0.001 гарантированно проходили depth test.
     const face = new THREE.Mesh(
       new THREE.PlaneGeometry(WIN_W, WIN_H),
       new THREE.MeshBasicMaterial({
@@ -529,7 +563,6 @@
       const ly = (0.5 - (r.y + r.h / 2) / TEX_H) * WIN_H;
       const rad = (r.w / 2 / TEX_W) * WIN_W;
 
-      // Hit-меш на том же z, что и визуальные кольца — активация совпадает с картинкой.
       const hit = new THREE.Mesh(
         new THREE.CircleGeometry(rad * 1.10, 24),
         new THREE.MeshBasicMaterial({ visible: false })
@@ -537,7 +570,6 @@
       hit.position.set(lx, ly, BTN_Z);
       group.add(hit);
 
-      // Заливка прогресса и кольцо — в ОДНОЙ плоскости (BTN_Z), чуть впереди окна.
       const prog = new THREE.Mesh(
         new THREE.CircleGeometry(rad * 1.05, 24),
         new THREE.MeshBasicMaterial({
@@ -901,7 +933,6 @@
     gotOrientation = true;
     dev.alpha = e.alpha || 0; dev.beta = e.beta || 0; dev.gamma = e.gamma || 0;
   });
-  window.addEventListener('orientationchange', function () { screenOrient = window.orientation || 0; });
 
   function tryEnableGyro() {
     if (gyroOn || requestInFlight || gyroFailed) return;
@@ -944,16 +975,60 @@
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
-  window.addEventListener('resize', resize);
-  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
-  /* ============ Joystick ============ */
+  /* ============ UI refs ============ */
   const joystickEl = document.getElementById('joystick');
   const joystickKnob = document.getElementById('joystick-knob');
+  const btnBuild = document.getElementById('btn-build');
+  const btnDestroy = document.getElementById('btn-destroy');
+  const btnJump = document.getElementById('btn-jump');
+  const fpsEl = document.getElementById('fps-counter');
+  const startScreen = document.getElementById('start-screen');
+  const crosshair = document.getElementById('crosshair');
+
+  /* ============ Orientation handling ============ */
+  // Если ориентация меняется, пока палец на джойстике —
+  // откладываем "перекладывание" UI до момента отпускания.
+  let orientationPending = false;
+
+  function forceReflowUI() {
+    // Принудительный пересчёт layout для всех fixed-элементов.
+    // Без этого некоторые браузеры (iOS Safari) оставляют
+    // fixed-элементы в старых позициях на мгновение.
+    void joystickEl.offsetHeight;
+    void btnBuild.offsetHeight;
+    void btnDestroy.offsetHeight;
+    void btnJump.offsetHeight;
+    void fpsEl.offsetHeight;
+    void crosshair.offsetHeight;
+  }
+
+  window.addEventListener('orientationchange', function () {
+    screenOrient = window.orientation || 0;
+
+    if (joystickActive) {
+      // Заморозить движение во время смены ориентации
+      orientationPending = true;
+      joystickVec.x = 0;
+      joystickVec.z = 0;
+    } else {
+      // Сразу всё пересчитываем
+      forceReflowUI();
+    }
+
+    // Пересчёт рендерера с задержкой — у некоторых телефонов
+    // новая ширина/высота появляются чуть позже события.
+    setTimeout(resize, 50);
+    setTimeout(resize, 250);
+    setTimeout(forceReflowUI, 300);
+  });
+
+  /* ============ Joystick ============ */
   const joystickVec = { x: 0, z: 0 };
   let joystickActive = false, joystickPointerId = null;
 
   function updateJoystickPos(e) {
+    if (orientationPending) return;   // заморожено на время смены ориентации
     const rect = joystickEl.getBoundingClientRect();
     const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     let dx = e.clientX - cx, dy = e.clientY - cy;
@@ -964,9 +1039,16 @@
     joystickKnob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
   }
   function resetJoystick() {
-    joystickActive = false; joystickPointerId = null;
-    joystickVec.x = 0; joystickVec.z = 0;
+    joystickActive = false;
+    joystickPointerId = null;
+    joystickVec.x = 0;
+    joystickVec.z = 0;
     joystickKnob.style.transform = 'translate(0, 0)';
+    if (orientationPending) {
+      orientationPending = false;
+      // Только сейчас "перекладываем" кнопки под новую ориентацию.
+      forceReflowUI();
+    }
   }
   joystickEl.addEventListener('pointerdown', function (e) {
     e.preventDefault(); e.stopPropagation();
@@ -985,9 +1067,6 @@
   joystickEl.addEventListener('pointercancel', resetJoystick);
 
   /* ============ Action buttons ============ */
-  const btnBuild = document.getElementById('btn-build');
-  const btnDestroy = document.getElementById('btn-destroy');
-  const btnJump = document.getElementById('btn-jump');
   function bindTap(el, fn) {
     el.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
   }
@@ -996,8 +1075,6 @@
   bindTap(btnJump, doJump);
 
   /* ============ Start / canvas input ============ */
-  const startScreen = document.getElementById('start-screen');
-  const crosshair = document.getElementById('crosshair');
   let started = false, consumeNextTap = false;
 
   function begin() {
@@ -1005,6 +1082,7 @@
     started = true;
     startScreen.classList.add('hidden');
     crosshair.classList.add('visible');
+    fpsEl.classList.add('visible');
     joystickEl.classList.add('active');
     btnBuild.classList.add('active');
     btnDestroy.classList.add('active');
@@ -1018,6 +1096,9 @@
     }, 2500);
   }
   startScreen.addEventListener('pointerdown', begin);
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
   let pointerInfo = null;
 
@@ -1058,6 +1139,22 @@
   });
   canvas.addEventListener('pointercancel', function () { pointerInfo = null; });
 
+  /* ============ FPS counter ============ */
+  let fpsFrames = 0;
+  let fpsLastUpdate = performance.now();
+
+  function updateFPS() {
+    fpsFrames++;
+    const nowMs = performance.now();
+    const elapsed = nowMs - fpsLastUpdate;
+    if (elapsed >= 500) {
+      const fps = Math.round(fpsFrames * 1000 / elapsed);
+      fpsEl.textContent = fps + ' FPS';
+      fpsFrames = 0;
+      fpsLastUpdate = nowMs;
+    }
+  }
+
   /* ============ Render loop ============ */
   let lastTime = performance.now();
   function render(now) {
@@ -1065,17 +1162,21 @@
     const t = (typeof now === 'number') ? now : performance.now();
     const dt = Math.min(0.05, Math.max(0, (t - lastTime) / 1000));
     lastTime = t;
+
     if (gyroOn) applyGyro();
     else if (lookMode) applyLook();
+
     if (started) {
       updatePlayer(dt);
       updateChunks();
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
+      updateFPS();
     } else {
       camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     }
+
     renderer.render(scene, camera);
   }
 
