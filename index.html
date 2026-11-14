@@ -20,7 +20,6 @@
     touch-action: none;
   }
 
-  /* ---------- Start screen ---------- */
   #start-screen {
     position: fixed; inset: 0; z-index: 20;
     display: flex; align-items: center; justify-content: center;
@@ -38,7 +37,6 @@
     pointer-events: none;
   }
 
-  /* ---------- Crosshair ---------- */
   #crosshair {
     position: fixed;
     left: 50%; top: 50%;
@@ -91,24 +89,13 @@
   const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 2000);
 
   /* ============================================================
-     Монотонный тёмный фон. Сфера нужна только как мишень рейкаста.
+     Константы
      ============================================================ */
-  const sphere = new THREE.Mesh(
-    new THREE.SphereGeometry(500, 32, 16),
-    new THREE.MeshBasicMaterial({ color: 0x050508, side: THREE.BackSide })
-  );
-  scene.add(sphere);
-
-  /* ============================================================
-     Константы окна/текстуры
-     ============================================================ */
+  const DIST = 60;                       // расстояние окон от камеры
   const TEX_W = 512, TEX_H = 384;
-  const WIN_W = 140, WIN_H = 105;
+  const WIN_W = 24, WIN_H = 18;
   const WINDOW_FONT = '500 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
 
-  /* ============================================================
-     Кнопки на окне: справа налево close, move, resize, text, flip
-     ============================================================ */
   const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
   const BTN_SIZE = 44, BTN_TOP = 12, BTN_RIGHT = 12, BTN_GAP = 4;
 
@@ -118,7 +105,7 @@
   }
 
   /* ============================================================
-     Отрисовка лица окна (тёмный простой скин)
+     Отрисовка лица окна
      ============================================================ */
   function wrapText(ctx, text, maxWidth) {
     const paragraphs = String(text).split('\n');
@@ -147,7 +134,6 @@
     const cy = r.y + r.h / 2;
     const rad = r.w / 2 - 2;
 
-    // лёгкая подложка
     ctx.beginPath();
     ctx.arc(cx, cy, rad, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(90, 208, 255, 0.08)';
@@ -201,23 +187,19 @@
   function drawWindowFace(ctx, W, H, text, flipped) {
     ctx.clearRect(0, 0, W, H);
 
-    // однотонный тёмный фон
     ctx.fillStyle = '#0d0d11';
     ctx.fillRect(0, 0, W, H);
 
-    // лёгкая внутренняя подсветка по центру
     const g = ctx.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, Math.max(W, H) * 0.7);
     g.addColorStop(0, 'rgba(30, 42, 52, 0.30)');
     g.addColorStop(1, 'rgba(5, 5, 8, 0.0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    // одна тонкая рамка
     ctx.strokeStyle = 'rgba(90, 208, 255, 0.45)';
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, W - 2, H - 2);
 
-    // текст
     if (text) {
       ctx.font = WINDOW_FONT;
       ctx.fillStyle = '#c8d8e0';
@@ -231,7 +213,6 @@
       }
     }
 
-    // кнопки
     for (let i = 0; i < BTN_IDS.length; i++) {
       drawButtonIcon(ctx, buttonRect(i), BTN_IDS[i], flipped);
     }
@@ -328,8 +309,8 @@
     win.tex.needsUpdate = true;
   }
 
-  function placeWindowAt(win, point) {
-    win.group.position.copy(point).multiplyScalar(0.985);
+  function placeWindowAt(win, dir) {
+    win.group.position.copy(dir).multiplyScalar(DIST);
     win.group.lookAt(0, 0, 0);
   }
 
@@ -340,11 +321,10 @@
       -((clientY - rect.top) / rect.height) * 2 + 1
     );
     raycaster.setFromCamera(ndc, camera);
-    const hits = raycaster.intersectObject(sphere, false);
-    if (!hits.length) return;
+    const dir = raycaster.ray.direction.clone().normalize();
 
     const win = makeWindow('');
-    placeWindowAt(win, hits[0].point);
+    placeWindowAt(win, dir);
     scene.add(win.group);
     windows.push(win);
   }
@@ -374,26 +354,17 @@
       mode = null;
       hideModeVisuals();
     }
-    if (hoveredBtn && hoveredBtn.win === win) hoveredBtn = null;
   }
 
   /* ============================================================
-     Raycast helpers
+     Raycaster для кнопок (сфера не нужна)
      ============================================================ */
   const raycaster = new THREE.Raycaster();
   const CENTER_NDC = new THREE.Vector2(0, 0);
 
-  function aimSpherePoint() {
-    raycaster.setFromCamera(CENTER_NDC, camera);
-    const hits = raycaster.intersectObject(sphere, false);
-    return hits.length ? hits[0].point.clone() : null;
-  }
-
   /* ============================================================
-     Ховер кнопок через перекрестие
+     Ховер кнопок
      ============================================================ */
-  let hoveredBtn = null;
-
   function getButtonUnderCrosshair() {
     if (!windows.length) return null;
 
@@ -414,7 +385,7 @@
       const w = windows[i];
       for (const id in w.buttons) {
         if (w.buttons[id].hit === obj) {
-          return { win: w, btn: w.buttons[id] };
+          return { win: w, btn: w.buttons[id], id: id };
         }
       }
     }
@@ -433,7 +404,6 @@
         b.prog.scale.setScalar(0.0001);
       }
     }
-    hoveredBtn = null;
   }
 
   function updateHover(dt) {
@@ -444,7 +414,6 @@
 
     const found = getButtonUnderCrosshair();
 
-    // сброс всех, кроме найденной
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
       for (const id in w.buttons) {
@@ -460,7 +429,6 @@
       }
     }
 
-    hoveredBtn = found || null;
     if (!found) return;
 
     const b = found.btn;
@@ -484,7 +452,7 @@
   }
 
   /* ============================================================
-     Действия кнопок
+     Действия
      ============================================================ */
   function fireButton(win, id) {
     if (id === 'close') {
@@ -511,7 +479,7 @@
   }
 
   /* ============================================================
-     Режимы move / resize через перекрестие
+     Режимы move / resize (без сферы — через углы)
      ============================================================ */
   let mode = null;
   const MODE_TOL = 6 * DEG;
@@ -545,26 +513,22 @@
   }
 
   function startMode(type, win) {
-    const aim = aimSpherePoint();
-    if (!aim) return;
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
 
-    // сброс ховера кнопок
     clearAllButtonVisuals();
 
     mode = {
       type: type,
       win: win,
-      plant: aim.clone(),
+      plant: dir.clone(),
       progress: 0,
       scaleT: 0,
       baseScale: win.group.scale.x || 1
     };
 
     if (type === 'move') {
-      win.group.position.copy(aim).multiplyScalar(0.985);
-      win.group.lookAt(0, 0, 0);
-    } else if (type === 'resize') {
-      mode.baseScale = win.group.scale.x || 1;
+      placeWindowAt(win, dir);
     }
 
     updateModeVisuals();
@@ -573,17 +537,17 @@
   function updateModeVisuals() {
     if (!mode) { hideModeVisuals(); return; }
 
-    const p = mode.plant.clone().multiplyScalar(0.965);
-    const dist = p.length();
+    const dist = DIST * 0.9;
+    const pos = mode.plant.clone().multiplyScalar(dist);
     const R = dist * Math.tan(MODE_TOL);
 
-    modeRing.position.copy(p);
+    modeRing.position.copy(pos);
     modeRing.lookAt(0, 0, 0);
     modeRing.scale.setScalar(R);
     modeRing.visible = true;
 
     const pr = Math.max(0, Math.min(1, mode.progress / MODE_DURATION));
-    modeFill.position.copy(mode.plant).multiplyScalar(0.963);
+    modeFill.position.copy(mode.plant).multiplyScalar(dist - 0.5);
     modeFill.lookAt(0, 0, 0);
     modeFill.scale.setScalar(Math.max(0.0001, R * pr));
     modeFill.visible = pr > 0.001;
@@ -592,25 +556,21 @@
   function updateMode(dt) {
     if (!mode) return;
 
-    const aim = aimSpherePoint();
-    if (!aim) return;
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
 
-    const plantDir = mode.plant.clone().normalize();
-    const aimDir = aim.clone().normalize();
-    const ang = Math.acos(Math.max(-1, Math.min(1, plantDir.dot(aimDir))));
-
+    const ang = Math.acos(Math.max(-1, Math.min(1, mode.plant.dot(dir))));
     const moving = ang > MODE_TOL;
 
     if (moving) {
-      mode.plant.copy(aim);
+      mode.plant.copy(dir);
       mode.progress = 0;
     } else {
       mode.progress += dt;
     }
 
     if (mode.type === 'move') {
-      mode.win.group.position.copy(aim).multiplyScalar(0.985);
-      mode.win.group.lookAt(0, 0, 0);
+      placeWindowAt(mode.win, dir);
     } else if (mode.type === 'resize') {
       if (moving) {
         mode.scaleT += dt;
@@ -674,9 +634,6 @@
   document.addEventListener('touchstart', tryEnableGyro, { passive: true });
   document.addEventListener('click', tryEnableGyro);
 
-  /* ============================================================
-     Применение гироскопа к камере
-     ============================================================ */
   const zee    = new THREE.Vector3(0, 0, 1);
   const _euler = new THREE.Euler();
   const q0     = new THREE.Quaternion();
@@ -695,7 +652,7 @@
   }
 
   /* ============================================================
-     Fallback: мышь/палец, если гироскоп недоступен
+     Fallback: мышь/палец
      ============================================================ */
   let lookMode = false;
   let lookYaw = 0, lookPitch = 0;
@@ -799,7 +756,7 @@
   });
 
   /* ============================================================
-     Рендер-цикл
+     Рендер
      ============================================================ */
   let lastTime = performance.now();
 
