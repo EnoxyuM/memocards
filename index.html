@@ -199,8 +199,7 @@ function createWindow(x, y, o){
     var b = e.target.closest ? e.target.closest('.btn') : null;
     if (!b) return;
     var a = b.dataset.act;
-    /* на ПК квадрат/треугольник работают через перетаскивание,
-       а не через click-переключение */
+    /* на ПК квадрат/треугольник работают через перетаскивание */
     if (!MOBILE && (a === 'move' || a === 'resize')) return;
     e.stopPropagation();
     act(obj, a);
@@ -272,37 +271,66 @@ function applyMode(o, m){
   setRing(0, false);
 }
 
-/* ---------------- orientation ---------------- */
+/* ---------------- orientation (fixed) ---------------- */
 var orientReady = false, orientTried = false;
+var usingCompass = false;
 var lastAlpha = null;
 var rawYaw = 0, rawPitch = 0;
 var smoothYaw = 0, smoothPitch = 0;
 
 function onOrient(e){
-  if (e.alpha == null) return;
+  if (e.alpha == null && e.webkitCompassHeading == null) return;
   orientReady = true;
-  var a = e.alpha;
-  if (lastAlpha !== null){
-    var d = a - lastAlpha;
-    if (d > 180)  d -= 360;
-    if (d < -180) d += 360;
-    rawYaw += d;
+
+  /* 1. iOS: webkitCompassHeading — стабильный курс */
+  if (e.webkitCompassHeading != null && !isNaN(e.webkitCompassHeading)){
+    usingCompass = true;
+    rawYaw = e.webkitCompassHeading;
+    rawPitch = (e.beta == null ? 45 : e.beta) - 45;
+    return;
   }
-  lastAlpha = a;
-  rawPitch = (e.beta == null ? 45 : e.beta) - 45;
+
+  /* 2. Android: абсолютный alpha из deviceorientationabsolute */
+  if (e.alpha != null && e.absolute === true && !usingCompass){
+    usingCompass = true;
+    rawYaw = 360 - e.alpha;
+    rawPitch = (e.beta == null ? 45 : e.beta) - 45;
+    return;
+  }
+
+  /* 3. Запасной вариант: накапливаем дельту alpha, отсекая выбросы */
+  if (e.alpha != null){
+    var a = e.alpha;
+    if (lastAlpha !== null){
+      var d = a - lastAlpha;
+      if (d > 180)  d -= 360;
+      if (d < -180) d += 360;
+      if (Math.abs(d) < 30) rawYaw += d;
+    }
+    lastAlpha = a;
+    rawPitch = (e.beta == null ? 45 : e.beta) - 45;
+  }
 }
 
 function enableOrientation(){
   if (!MOBILE || orientTried) return;
   orientTried = true;
+
+  function addListeners(){
+    if (window.DeviceOrientationEvent && 'ondeviceorientationabsolute' in window){
+      window.addEventListener('deviceorientationabsolute', onOrient);
+    }
+    window.addEventListener('deviceorientation', onOrient);
+  }
+
   try {
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function'){
       DeviceOrientationEvent.requestPermission().then(function(r){
-        if (r === 'granted') addEventListener('deviceorientation', onOrient);
+        if (r === 'granted') addListeners();
       }).catch(function(){});
     } else if (typeof DeviceOrientationEvent !== 'undefined'){
-      addEventListener('deviceorientation', onOrient);
+      addListeners();
     }
   } catch(err){}
 }
@@ -326,7 +354,6 @@ addEventListener('mousedown', function(e){
 addEventListener('mousemove', function(e){
   if (MOBILE) return;
 
-  /* PC: перетаскивание окна за квадрат/треугольник */
   if (drag){
     var dx = e.clientX - drag.sx;
     var dy = e.clientY - drag.sy;
@@ -340,7 +367,6 @@ addEventListener('mousemove', function(e){
     return;
   }
 
-  /* панорамирование воркспейса */
   if (!down) return;
   var mx2 = e.clientX - down.x, my2 = e.clientY - down.y;
   if (!down.moved && (mx2*mx2 + my2*my2) > 16) down.moved = true;
@@ -379,7 +405,6 @@ addEventListener('click', function(e){
   createWindow(camX - 130, camY - 85);
 });
 
-/* touch fallback panning — только пока ориентация недоступна */
 var touchPt = null;
 
 addEventListener('touchstart', function(e){
@@ -407,7 +432,7 @@ addEventListener('touchend', function(){
   touchPt = null;
 });
 
-/* ---------------- charge / dwell (только мобильные) ---------------- */
+/* ---------------- charge / dwell (мобильные) ---------------- */
 var chargeBtn = null, chargeStart = 0, firedBtn = null;
 var lastCCamX = 0, lastCCamY = 0;
 
@@ -467,7 +492,7 @@ function frame(t){
   lastT = t;
 
   if (MOBILE && orientReady){
-    smoothYaw   += (rawYaw   - smoothYaw)   * 0.18;
+    smoothYaw   += (rawYaw   - smoothYaw)   * 0.08;
     smoothPitch += (rawPitch - smoothPitch) * 0.18;
     camX = -smoothYaw * 9;
     var cy = smoothPitch * 7;
