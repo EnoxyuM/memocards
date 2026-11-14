@@ -29,13 +29,10 @@
 (function () {
   'use strict';
 
-  if (typeof THREE === 'undefined') {
-    console.error('[pano] Three.js не загрузился');
-    return;
-  }
+  if (typeof THREE === 'undefined') return;
 
   /* ============================================================
-     Тестовая панорама (4 стороны, FRONT виден сразу)
+     Тестовая панорама
      ============================================================ */
   function generateTestPano() {
     const W = 2048, H = 1024;
@@ -89,6 +86,7 @@
 
   const scene  = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1100);
+  camera.rotation.order = 'YXZ';
 
   const tex = new THREE.CanvasTexture(generateTestPano());
   tex.minFilter = THREE.LinearFilter;
@@ -98,7 +96,7 @@
     new THREE.SphereGeometry(500, 60, 40),
     new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
   );
-  sphere.rotation.y = Math.PI / 2;   // FRONT прямо перед камерой
+  sphere.rotation.y = Math.PI / 2;   // FRONT перед камерой
   scene.add(sphere);
 
   /* ============================================================
@@ -119,72 +117,78 @@
   });
 
   /* ============================================================
-     Гироскоп — включается сразу, на iOS — по первому тапу
+     Гироскоп — только данные из событий, без флагов
      ============================================================ */
-  let gyroOn = false;
-  let requestInFlight = false;
-
   const dev = { alpha: 0, beta: 0, gamma: 0 };
+  let gotGyroData = false;
+  let permissionGranted = false;
+  let requestInFlight = false;
   let screenOrient = window.orientation || 0;
 
-  window.addEventListener('deviceorientation', function (e) {
-    if (e.alpha == null && e.beta == null && e.gamma == null) return;
-    dev.alpha = e.alpha || 0;
-    dev.beta  = e.beta  || 0;
-    dev.gamma = e.gamma || 0;
-  });
+  function onOrient(e) {
+    // Принимаем только реальные числа (на десктопе часто null)
+    if (typeof e.alpha !== 'number' ||
+        typeof e.beta  !== 'number' ||
+        typeof e.gamma !== 'number') return;
+
+    dev.alpha = e.alpha;
+    dev.beta  = e.beta;
+    dev.gamma = e.gamma;
+
+    if (!gotGyroData) {
+      gotGyroData = true;
+      console.log('[pano] gyroscope data arrived');
+    }
+  }
+
+  window.addEventListener('deviceorientation', onOrient);
+  window.addEventListener('deviceorientationabsolute', onOrient);
+
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
   });
 
+  // iOS 13+ требует requestPermission из жеста.
+  // Chrome Android 119+ — просто требует любой жест (его не запрашиваем,
+  // просто ждём, пока браузер сам разблокирует события после тапа).
   function tryEnableGyro() {
-    if (gyroOn || requestInFlight) return;
+    if (permissionGranted || requestInFlight) return;
 
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
-      // iOS 13+ — нужен жест пользователя (это вызывает Safari)
       requestInFlight = true;
       DeviceOrientationEvent.requestPermission()
         .then(function (p) {
           requestInFlight = false;
-          if (p === 'granted') gyroOn = true;
+          if (p === 'granted') permissionGranted = true;
         })
-        .catch(function () {
-          requestInFlight = false;
-          // Safari отклонил без жеста — попробуем на следующем тапе
-        });
+        .catch(function () { requestInFlight = false; });
     } else {
-      // Android / desktop — включается сразу
-      gyroOn = true;
+      permissionGranted = true;
     }
   }
 
-  // 1) сразу на загрузке
   tryEnableGyro();
-
-  // 2) на любой тап / клик (нужно только для iOS)
-  document.addEventListener('touchstart', tryEnableGyro, { passive: true });
-  document.addEventListener('click',      tryEnableGyro);
+  document.addEventListener('touchstart',  tryEnableGyro, { passive: true });
+  document.addEventListener('pointerdown', tryEnableGyro);
+  document.addEventListener('click',       tryEnableGyro);
+  document.addEventListener('keydown',     tryEnableGyro);
 
   /* ============================================================
      Применение гироскопа к камере
      ============================================================ */
   const DEG    = Math.PI / 180;
-  const zee    = new THREE.Vector3(0, 0, 1);
+  const ZEE    = new THREE.Vector3(0, 0, 1);
   const _euler = new THREE.Euler();
-  const q0     = new THREE.Quaternion();
-  const q1     = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+  const Q0     = new THREE.Quaternion();
+  const Q1     = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 
   function applyGyro() {
-    const a = dev.alpha * DEG;
-    const b = dev.beta  * DEG;
-    const g = dev.gamma * DEG;
-    const o = screenOrient * DEG;
-
-    _euler.set(b, a, -g, 'YXZ');
+    _euler.set(dev.beta * DEG, dev.alpha * DEG, -dev.gamma * DEG, 'YXZ');
     camera.quaternion.setFromEuler(_euler);
-    camera.quaternion.multiply(q1);
-    camera.quaternion.multiply(q0.setFromAxisAngle(zee, -o));
+    camera.quaternion.multiply(Q1);
+    Q0.setFromAxisAngle(ZEE, -screenOrient * DEG);
+    camera.quaternion.multiply(Q0);
   }
 
   /* ============================================================
@@ -192,7 +196,10 @@
      ============================================================ */
   function render() {
     requestAnimationFrame(render);
-    if (gyroOn) applyGyro();
+
+    // пока данных нет — камера смотрит на FRONT (rotation 0,0,0)
+    if (gotGyroData) applyGyro();
+
     renderer.render(scene, camera);
   }
 
