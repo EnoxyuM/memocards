@@ -32,10 +32,7 @@
     transition: opacity 0.45s ease;
     -webkit-user-select: none; user-select: none;
   }
-  #start-screen.hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
+  #start-screen.hidden { opacity: 0; pointer-events: none; }
 
   #crosshair {
     position: fixed;
@@ -91,7 +88,7 @@
   /* ============================================================
      Константы
      ============================================================ */
-  const DIST = 60;                       // расстояние окон от камеры
+  const DIST = 60;
   const TEX_W = 512, TEX_H = 384;
   const WIN_W = 24, WIN_H = 18;
   const WINDOW_FONT = '500 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
@@ -102,6 +99,29 @@
   function buttonRect(index) {
     const right = TEX_W - BTN_RIGHT - index * (BTN_SIZE + BTN_GAP);
     return { x: right - BTN_SIZE, y: BTN_TOP, w: BTN_SIZE, h: BTN_SIZE };
+  }
+
+  /* ============================================================
+     Цветовые схемы (сине-голубая и розовая)
+     ============================================================ */
+  function palette(flipped) {
+    return flipped ? {
+      accent:      '#ff7ec1',
+      accentLight: '#ffb0d8',
+      accentSoft:  'rgba(255, 126, 193, 0.10)',
+      border:      'rgba(255, 126, 193, 0.50)',
+      text:        '#f5dce8',
+      glow:        'rgba(255, 126, 193, 0.28)',
+      hex:         0xff7ec1
+    } : {
+      accent:      '#5ad0ff',
+      accentLight: '#8fe4ff',
+      accentSoft:  'rgba(90, 208, 255, 0.10)',
+      border:      'rgba(90, 208, 255, 0.50)',
+      text:        '#c8d8e0',
+      glow:        'rgba(90, 208, 255, 0.28)',
+      hex:         0x5ad0ff
+    };
   }
 
   /* ============================================================
@@ -129,18 +149,18 @@
     return lines;
   }
 
-  function drawButtonIcon(ctx, r, id, flipped) {
+  function drawButtonIcon(ctx, r, id, flipped, p) {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     const rad = r.w / 2 - 2;
 
     ctx.beginPath();
     ctx.arc(cx, cy, rad, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(90, 208, 255, 0.08)';
+    ctx.fillStyle = p.accentSoft;
     ctx.fill();
 
-    ctx.strokeStyle = '#8fe4ff';
-    ctx.fillStyle = '#8fe4ff';
+    ctx.strokeStyle = p.accentLight;
+    ctx.fillStyle   = p.accentLight;
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -185,24 +205,25 @@
   }
 
   function drawWindowFace(ctx, W, H, text, flipped) {
-    ctx.clearRect(0, 0, W, H);
+    const p = palette(flipped);
 
+    ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#0d0d11';
     ctx.fillRect(0, 0, W, H);
 
     const g = ctx.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, Math.max(W, H) * 0.7);
-    g.addColorStop(0, 'rgba(30, 42, 52, 0.30)');
+    g.addColorStop(0, p.glow);
     g.addColorStop(1, 'rgba(5, 5, 8, 0.0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
 
-    ctx.strokeStyle = 'rgba(90, 208, 255, 0.45)';
+    ctx.strokeStyle = p.border;
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, W - 2, H - 2);
 
     if (text) {
       ctx.font = WINDOW_FONT;
-      ctx.fillStyle = '#c8d8e0';
+      ctx.fillStyle = p.text;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const lines = wrapText(ctx, text, W - 90).slice(0, 4);
@@ -214,7 +235,7 @@
     }
 
     for (let i = 0; i < BTN_IDS.length; i++) {
-      drawButtonIcon(ctx, buttonRect(i), BTN_IDS[i], flipped);
+      drawButtonIcon(ctx, buttonRect(i), BTN_IDS[i], flipped, p);
     }
   }
 
@@ -307,6 +328,12 @@
     const text = win.flipped ? win.textBack : win.textFront;
     drawWindowFace(win.ctx, TEX_W, TEX_H, text, win.flipped);
     win.tex.needsUpdate = true;
+
+    const col = palette(win.flipped).hex;
+    for (const id in win.buttons) {
+      win.buttons[id].ring.material.color.setHex(col);
+      win.buttons[id].prog.material.color.setHex(col);
+    }
   }
 
   function placeWindowAt(win, dir) {
@@ -314,15 +341,9 @@
     win.group.lookAt(0, 0, 0);
   }
 
-  function createWindowAtScreen(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1
-    );
-    raycaster.setFromCamera(ndc, camera);
-    const dir = raycaster.ray.direction.clone().normalize();
-
+  function createWindowCenter() {
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
     const win = makeWindow('');
     placeWindowAt(win, dir);
     scene.add(win.group);
@@ -354,13 +375,123 @@
       mode = null;
       hideModeVisuals();
     }
+    if (editingWin === win) cancelEdit();
   }
 
   /* ============================================================
-     Raycaster для кнопок (сфера не нужна)
+     Raycaster
      ============================================================ */
   const raycaster = new THREE.Raycaster();
   const CENTER_NDC = new THREE.Vector2(0, 0);
+
+  /* ============================================================
+     Ввод текста (пытаемся открыть клавиатуру сразу)
+     ============================================================ */
+  let editInput = null;
+  let editingWin = null;
+  let lastEditEnd = 0;
+
+  function ensureInput() {
+    if (editInput) return editInput;
+
+    editInput = document.createElement('input');
+    editInput.type = 'text';
+    editInput.id = 'window-text-input';
+    editInput.autocomplete = 'off';
+    editInput.spellcheck = false;
+    editInput.setAttribute('autocorrect', 'off');
+    editInput.setAttribute('autocapitalize', 'sentences');
+    editInput.setAttribute('enterkeyhint', 'done');
+
+    Object.assign(editInput.style, {
+      position: 'fixed',
+      left: '50%',
+      top: '28%',
+      transform: 'translate(-50%, -50%)',
+      width: '72%',
+      maxWidth: '420px',
+      boxSizing: 'border-box',
+      padding: '14px 18px',
+      fontSize: '20px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
+      background: '#0d0d11',
+      color: '#e9f8ff',
+      border: '2px solid #5ad0ff',
+      borderRadius: '10px',
+      boxShadow: '0 0 24px rgba(90,208,255,0.55)',
+      zIndex: 100,
+      outline: 'none',
+      display: 'none',
+      caretColor: '#5ad0ff'
+    });
+
+    document.body.appendChild(editInput);
+
+    editInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+    });
+
+    editInput.addEventListener('blur', function () {
+      setTimeout(function () {
+        if (editingWin && document.activeElement !== editInput) commitEdit();
+      }, 120);
+    });
+
+    return editInput;
+  }
+
+  function editText(win) {
+    ensureInput();
+    editingWin = win;
+
+    const p = palette(win.flipped);
+    editInput.style.borderColor = p.accent;
+    editInput.style.boxShadow = '0 0 24px ' + (win.flipped
+      ? 'rgba(255,126,193,0.55)'
+      : 'rgba(90,208,255,0.55)');
+    editInput.style.caretColor = p.accent;
+    editInput.style.color = win.flipped ? '#f5dce8' : '#e9f8ff';
+
+    editInput.value = win.flipped ? win.textBack : win.textFront;
+    editInput.style.display = 'block';
+
+    // Несколько попыток фокуса (iOS иногда игнорирует первую)
+    const tryFocus = function () {
+      try {
+        editInput.focus({ preventScroll: true });
+        editInput.setSelectionRange(editInput.value.length, editInput.value.length);
+      } catch (e) {}
+    };
+    tryFocus();
+    requestAnimationFrame(tryFocus);
+    setTimeout(tryFocus, 20);
+    setTimeout(tryFocus, 80);
+    setTimeout(tryFocus, 200);
+  }
+
+  function commitEdit() {
+    if (!editingWin || !editInput) return;
+    const win = editingWin;
+    editingWin = null;
+    lastEditEnd = performance.now();
+
+    const value = editInput.value;
+    if (win.flipped) win.textBack = value;
+    else win.textFront = value;
+    refreshWindow(win);
+
+    editInput.style.display = 'none';
+    try { editInput.blur(); } catch (e) {}
+  }
+
+  function cancelEdit() {
+    if (!editInput) return;
+    editingWin = null;
+    lastEditEnd = performance.now();
+    editInput.style.display = 'none';
+    try { editInput.blur(); } catch (e) {}
+  }
 
   /* ============================================================
      Ховер кнопок
@@ -371,9 +502,7 @@
     const hitsList = [];
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
-      for (const id in w.buttons) {
-        hitsList.push(w.buttons[id].hit);
-      }
+      for (const id in w.buttons) hitsList.push(w.buttons[id].hit);
     }
 
     raycaster.setFromCamera(CENTER_NDC, camera);
@@ -407,7 +536,7 @@
   }
 
   function updateHover(dt) {
-    if (mode) {
+    if (mode || editingWin) {
       clearAllButtonVisuals();
       return;
     }
@@ -430,7 +559,6 @@
     }
 
     if (!found) return;
-
     const b = found.btn;
     b.ring.visible = true;
 
@@ -469,17 +597,8 @@
     }
   }
 
-  function editText(win) {
-    const current = win.flipped ? win.textBack : win.textFront;
-    const value = window.prompt('Window text:', current);
-    if (value === null) return;
-    if (win.flipped) win.textBack = value;
-    else win.textFront = value;
-    refreshWindow(win);
-  }
-
   /* ============================================================
-     Режимы move / resize (без сферы — через углы)
+     Режимы move / resize
      ============================================================ */
   let mode = null;
   const MODE_TOL = 6 * DEG;
@@ -527,9 +646,11 @@
       baseScale: win.group.scale.x || 1
     };
 
-    if (type === 'move') {
-      placeWindowAt(win, dir);
-    }
+    if (type === 'move') placeWindowAt(win, dir);
+
+    const col = palette(win.flipped).hex;
+    modeRing.material.color.setHex(col);
+    modeFill.material.color.setHex(col);
 
     updateModeVisuals();
   }
@@ -612,7 +733,6 @@
 
   function tryEnableGyro() {
     if (gyroOn || requestInFlight || gyroFailed) return;
-
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
       requestInFlight = true;
@@ -681,12 +801,13 @@
   });
 
   /* ============================================================
-     Ввод
+     Ввод: старт + тап = создание окна в центре
      ============================================================ */
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
 
   let started = false;
+  let consumeNextTap = false;
 
   function begin() {
     if (started) return;
@@ -709,6 +830,14 @@
 
   canvas.addEventListener('pointerdown', function (e) {
     if (!started) return;
+
+    // Если открыт ввод текста — тап закрывает его, окно не создаётся
+    if (editingWin) {
+      commitEdit();
+      consumeNextTap = true;
+      return;
+    }
+
     pointerInfo = {
       id: e.pointerId,
       lastX: e.clientX,
@@ -730,7 +859,7 @@
     pointerInfo.lastY = e.clientY;
     pointerInfo.moved += Math.abs(dx) + Math.abs(dy);
 
-    if (lookMode && !mode) {
+    if (lookMode && !mode && !editingWin) {
       lookYaw   -= dx * 0.0045;
       lookPitch -= dy * 0.0045;
       lookPitch = Math.max(-1.25, Math.min(1.25, lookPitch));
@@ -738,6 +867,11 @@
   });
 
   canvas.addEventListener('pointerup', function (e) {
+    if (consumeNextTap) {
+      consumeNextTap = false;
+      pointerInfo = null;
+      return;
+    }
     if (!pointerInfo || e.pointerId !== pointerInfo.id) {
       pointerInfo = null;
       return;
@@ -746,8 +880,9 @@
     pointerInfo = null;
 
     if (!started) return;
+    if (performance.now() - lastEditEnd < 300) return;
     if (info.moved < 12 && performance.now() - info.t < 700) {
-      if (!mode) createWindowAtScreen(e.clientX, e.clientY);
+      if (!mode && !editingWin) createWindowCenter();
     }
   });
 
