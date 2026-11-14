@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=overlays-content">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>AR Windows</title>
 <style>
@@ -106,6 +106,7 @@
   #hud .warn { color: #ffb060; }
   #hud .bad  { color: #ff7a7a; }
 
+  /* Бургер без анимации — статичные три полоски */
   #burger-btn {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top, 0px));
@@ -123,7 +124,6 @@
     gap: 4px;
     cursor: pointer;
     box-sizing: border-box;
-    transition: background 0.2s ease, border-color 0.2s ease;
     -webkit-tap-highlight-color: transparent;
     will-change: transform; backface-visibility: hidden;
   }
@@ -135,11 +135,7 @@
     background: #8fe4ff;
     border-radius: 1px;
     box-shadow: 0 0 4px rgba(90, 208, 255, 0.6);
-    transition: transform 0.2s ease, opacity 0.2s ease;
   }
-  #burger-btn.open span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
-  #burger-btn.open span:nth-child(2) { opacity: 0; }
-  #burger-btn.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
   #burger-menu {
     position: fixed;
@@ -249,7 +245,7 @@
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.6.1</div>
+  <div id="start-version">v1.6.2</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -262,7 +258,7 @@
   /* ============================================================
      VERSION
      ============================================================ */
-  const VERSION = '1.6.1';
+  const VERSION = '1.6.2';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -332,7 +328,7 @@
   }
 
   /* ============================================================
-     UI tap tracking — чтобы один тап не проходил и в DOM, и в WebXR select
+     UI tap tracking
      ============================================================ */
   let uiTapTime = 0;
   const UI_TAP_GUARD_MS = 250;
@@ -402,7 +398,6 @@
     setMenuOpen(!isMenuOpen());
   });
 
-  // Помечаем любой тап по DOM-UI, чтобы WebXR select не отработал на нём же
   document.addEventListener('pointerdown', function (e) {
     if (burgerBtn.contains(e.target) || burgerMenu.contains(e.target) || (editInput && editInput.contains(e.target))) {
       markUITap();
@@ -509,7 +504,6 @@
     };
   }
 
-  // Перенос по словам + посимвольное дробление слишком длинных слов.
   function wrapText(ctx, text, maxWidth) {
     const paragraphs = String(text).split('\n');
     const lines = [];
@@ -526,8 +520,6 @@
           continue;
         }
         if (line) { lines.push(line); line = ''; }
-
-        // Слово само по себе не влезает — дробим посимвольно
         if (ctx.measureText(word).width > maxWidth) {
           let sub = '';
           for (let k = 0; k < word.length; k++) {
@@ -930,8 +922,6 @@
     editInput.setAttribute('autocorrect', 'off');
     editInput.setAttribute('autocapitalize', 'sentences');
     editInput.rows = 3;
-    // Позиционируем БЕЗ вертикального ре-центрирования — иначе при росте
-    // textarea (перенос строки) он «прыгает» и перерисовывает окружение.
     Object.assign(editInput.style, {
       position: 'fixed',
       left: '50%',
@@ -1010,6 +1000,8 @@
     refreshWindow(win);
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
+    // Клавиатура закрывается — дождёмся и подхватим актуальные размеры
+    setTimeout(resize, 200);
   }
   function cancelEdit() {
     if (!editInput) return;
@@ -1017,6 +1009,7 @@
     lastEditEnd = performance.now();
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
+    setTimeout(resize, 200);
   }
 
   /* ============================================================
@@ -1062,14 +1055,24 @@
   function applyLook() { _lookEuler.set(lookPitch, lookYaw, 0, 'YXZ'); camera.quaternion.setFromEuler(_lookEuler); }
 
   /* ============================================================
-     Resize (debounced)
+     Resize (guard against keyboard-induced flicker)
      ============================================================ */
+  let lastResizeW = 0, lastResizeH = 0;
+
   function resize() {
     if (renderer.xr.isPresenting) return;
+    if (editingWin) return; // клавиатура открыта — WebGL не трогаем
+
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
     if (w < 10) w = window.innerWidth;
     if (h < 10) h = window.innerHeight;
+
+    // Игнорируем микроколебания (панель подсказок клавиатуры, тулбары и т.п.)
+    if (Math.abs(w - lastResizeW) < 4 && Math.abs(h - lastResizeH) < 4) return;
+    lastResizeW = w;
+    lastResizeH = h;
+
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
@@ -1079,6 +1082,7 @@
 
   let resizeTimer = null;
   function scheduleResize() {
+    if (editingWin) return;
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(resize, 100);
   }
@@ -1099,7 +1103,7 @@
      ============================================================ */
   function updateHUD() {
     if (!started) { hudEl.classList.remove('visible'); return; }
-    if (editingWin) return; // не трогаем DOM, пока клавиатура открыта
+    if (editingWin) return;
     hudEl.classList.add('visible');
     const pos = xrMode ? _xrViewerPos : getEye();
     const moving = xrViewerPosChanges > 5;
@@ -1222,7 +1226,6 @@
 
   function onXRSelect() {
     if (!started) return;
-    // Тап по DOM-UI уже отработал через click — не дублируем в select
     if (recentUITap()) return;
     if (isMenuOpen()) return;
 
