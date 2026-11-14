@@ -10,7 +10,7 @@
     margin: 0; padding: 0;
     width: 100%; height: 100%;
     overflow: hidden;
-    background: #0a0e14;
+    background: #000;
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
     touch-action: none;
@@ -52,51 +52,13 @@
   }
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
-
-  #fps-counter {
-    position: fixed;
-    top: calc(12px + env(safe-area-inset-top, 0px));
-    right: calc(12px + env(safe-area-inset-right, 0px));
-    z-index: 25;
-    color: #5ad0ff;
-    font: 600 12px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    letter-spacing: 0.05em;
-    text-shadow:
-      0 0 1px #000,
-      0 0 3px #000,
-      0 0 6px rgba(90, 208, 255, 0.55);
-  }
-  #fps-counter.visible { opacity: 1; }
-
-  #joystick {
-    position: fixed;
-    left: calc(24px + env(safe-area-inset-left, 0px));
-    bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-    width: 130px; height: 130px; border-radius: 50%;
-    background: rgba(90, 208, 255, 0.08);
-    border: 2px solid rgba(90, 208, 255, 0.5);
-    z-index: 15; touch-action: none; display: none;
-  }
-  #joystick.active { display: block; }
-  #joystick-knob {
-    position: absolute; left: 50%; top: 50%;
-    width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
-    background: rgba(90, 208, 255, 0.3);
-    border: 2px solid rgba(90, 208, 255, 0.9);
-    pointer-events: none; will-change: transform;
-  }
 </style>
 </head>
 <body>
 <video id="camera-feed" autoplay playsinline muted></video>
 <canvas id="pano-canvas"></canvas>
 <div id="crosshair"></div>
-<div id="fps-counter">-- FPS</div>
 <div id="start-screen">Tap to Start.</div>
-<div id="joystick"><div id="joystick-knob"></div></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -106,9 +68,6 @@
 
   const DEG = Math.PI / 180;
 
-  /* ============================================================
-     Device detection & performance options
-     ============================================================ */
   const isMobile = (function () {
     if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return true;
     if (navigator.maxTouchPoints > 0 && window.matchMedia('(pointer: coarse)').matches) return true;
@@ -138,15 +97,50 @@
   const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2000);
 
   /* ============================================================
-     Camera feed (background)
+     Camera feed
      ============================================================ */
+  function updateVideoFit() {
+    if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+    const va = videoEl.videoWidth / videoEl.videoHeight;
+    const sa = window.innerWidth / window.innerHeight;
+    const ratio = Math.max(va / sa, sa / va);
+    // Если пропорции сильно расходятся — показываем полный кадр (без зума).
+    // Если близки — заполняем экран.
+    videoEl.style.objectFit = ratio > 1.5 ? 'contain' : 'cover';
+  }
+
   async function requestCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       console.warn('[camera] getUserMedia недоступен');
       return;
     }
+    const sa = window.innerWidth / window.innerHeight;
     const tries = [
-      { video: { facingMode: { ideal: 'environment' } }, audio: false },
+      {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          aspectRatio: { ideal: sa }
+        },
+        audio: false
+      },
+      {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      },
+      {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      },
       { video: { facingMode: 'environment' }, audio: false },
       { video: true, audio: false }
     ];
@@ -155,7 +149,8 @@
         const stream = await navigator.mediaDevices.getUserMedia(tries[i]);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        try { await videoEl.play(); } catch (e) { /* autoplay часто справляется */ }
+        try { await videoEl.play(); } catch (e) {}
+        updateVideoFit();
         return;
       } catch (err) {
         console.warn('[camera] попытка', i, 'не удалась:', err);
@@ -164,11 +159,13 @@
     console.warn('[camera] камера недоступна');
   }
 
+  videoEl.addEventListener('loadedmetadata', updateVideoFit);
+  videoEl.addEventListener('canplay', updateVideoFit);
+
   /* ============================================================
-     Player
+     Player — стоит на месте, только осматривается
      ============================================================ */
   const EYE_HEIGHT = 1.55;
-  const MAX_SPEED = 5;
   const REACH = 6;
 
   const playerPos = new THREE.Vector3(0, 0, 0);
@@ -176,24 +173,15 @@
   const _camDir = new THREE.Vector3();
   function getCamDir() { camera.getWorldDirection(_camDir); return _camDir; }
 
-  function updatePlayer(dt) {
-    const camDir = getCamDir();
-    let yawX = camDir.x, yawZ = camDir.z;
-    const yawLen = Math.hypot(yawX, yawZ);
-    if (yawLen > 0.0001) { yawX /= yawLen; yawZ /= yawLen; }
-    const rightX = -yawZ, rightZ = yawX;
-    const wishX = (yawX * joystickVec.z + rightX * joystickVec.x) * MAX_SPEED;
-    const wishZ = (yawZ * joystickVec.z + rightZ * joystickVec.x) * MAX_SPEED;
-    playerPos.x += wishX * dt;
-    playerPos.z += wishZ * dt;
-    camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+  function getEye() {
+    return new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
   }
 
   /* ============================================================
      Aim placement — окна создаются в направлении взгляда
      ============================================================ */
   function getAimPlacement() {
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const eye = getEye();
     const dir = getCamDir().clone();
     const pos = eye.clone().add(dir.clone().multiplyScalar(REACH));
     const normal = dir.clone().negate().normalize();
@@ -398,7 +386,9 @@
         placement.pos.z + n.z
       );
     } else {
-      const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+      // Окно "смотрит" на точку, откуда его повесили. Позиция и поворот
+      // фиксируются один раз — дальше окно висит в мире и не двигается.
+      const eye = getEye();
       win.group.lookAt(eye);
     }
   }
@@ -430,7 +420,7 @@
   }
 
   function updateWindowVisibility() {
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const eye = getEye();
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
       w.group.visible = w.group.position.distanceTo(eye) <= MAX_WIN_DIST;
@@ -537,7 +527,7 @@
 
   function startMode(type, win) {
     const dir = getCamDir().clone();
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const eye = getEye();
     clearAllButtonVisuals();
     mode = {
       type, win,
@@ -555,7 +545,7 @@
   function updateModeVisuals(placement) {
     if (!mode) { hideModeVisuals(); return; }
     if (!placement) placement = getAimPlacement();
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const eye = getEye();
     const distToAim = placement.pos.distanceTo(eye);
     const R = Math.max(0.03, distToAim * Math.tan(MODE_TOL));
 
@@ -574,14 +564,13 @@
   function updateMode(dt) {
     if (!mode) return;
 
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const eye = getEye();
     const dir = getCamDir().clone();
     const placement = getAimPlacement();
 
     const aimAng = Math.acos(Math.max(-1, Math.min(1, mode.plantDir.dot(dir))));
     const eyeMoved = mode.plantOrigin.distanceTo(eye);
-    const isRunning = Math.hypot(joystickVec.x, joystickVec.z) > 0.1;
-    const stable = aimAng <= MODE_TOL && eyeMoved <= 0.3 && !isRunning;
+    const stable = aimAng <= MODE_TOL && eyeMoved <= 0.3;
 
     if (!stable) {
       mode.plantOrigin.copy(eye);
@@ -760,85 +749,24 @@
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    updateVideoFit();
   }
 
   /* ============================================================
      UI refs
      ============================================================ */
-  const joystickEl = document.getElementById('joystick');
-  const joystickKnob = document.getElementById('joystick-knob');
-  const fpsEl = document.getElementById('fps-counter');
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
 
   /* ============================================================
      Orientation
      ============================================================ */
-  let orientationPending = false;
-
-  function forceReflowUI() {
-    void joystickEl.offsetHeight;
-    void fpsEl.offsetHeight;
-    void crosshair.offsetHeight;
-  }
-
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
-    if (joystickActive) {
-      orientationPending = true;
-      joystickVec.x = 0;
-      joystickVec.z = 0;
-    } else {
-      forceReflowUI();
-    }
     setTimeout(resize, 50);
     setTimeout(resize, 250);
-    setTimeout(forceReflowUI, 300);
+    setTimeout(updateVideoFit, 300);
   });
-
-  /* ============================================================
-     Joystick
-     ============================================================ */
-  const joystickVec = { x: 0, z: 0 };
-  let joystickActive = false, joystickPointerId = null;
-
-  function updateJoystickPos(e) {
-    if (orientationPending) return;
-    const rect = joystickEl.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    let dx = e.clientX - cx, dy = e.clientY - cy;
-    const maxR = rect.width / 2 - 15;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
-    joystickVec.x = dx / maxR; joystickVec.z = -dy / maxR;
-    joystickKnob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
-  }
-  function resetJoystick() {
-    joystickActive = false;
-    joystickPointerId = null;
-    joystickVec.x = 0;
-    joystickVec.z = 0;
-    joystickKnob.style.transform = 'translate(0, 0)';
-    if (orientationPending) {
-      orientationPending = false;
-      forceReflowUI();
-    }
-  }
-  joystickEl.addEventListener('pointerdown', function (e) {
-    e.preventDefault(); e.stopPropagation();
-    joystickActive = true; joystickPointerId = e.pointerId;
-    try { joystickEl.setPointerCapture(e.pointerId); } catch (err) {}
-    updateJoystickPos(e);
-  });
-  joystickEl.addEventListener('pointermove', function (e) {
-    if (!joystickActive || e.pointerId !== joystickPointerId) return;
-    e.preventDefault(); updateJoystickPos(e);
-  });
-  joystickEl.addEventListener('pointerup', function (e) {
-    if (!joystickActive || e.pointerId !== joystickPointerId) return;
-    resetJoystick();
-  });
-  joystickEl.addEventListener('pointercancel', resetJoystick);
 
   /* ============================================================
      Start
@@ -849,17 +777,17 @@
     if (started || beginning) return;
     beginning = true;
 
-    // Запрашиваем камеру (может вызвать системный диалог)
+    // Запрашиваем камеру (системный диалог)
     try { await requestCamera(); } catch (e) {}
 
     started = true;
     startScreen.classList.add('hidden');
     crosshair.classList.add('visible');
-    fpsEl.classList.add('visible');
-    joystickEl.classList.add('active');
     warmUpKeyboard();
     tryEnableGyro();
+
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+
     setTimeout(function () {
       if (!gotOrientation && !gyroOn) { gyroOn = false; gyroFailed = true; lookMode = true; }
     }, 2500);
@@ -867,7 +795,6 @@
   startScreen.addEventListener('pointerdown', begin);
 
   window.addEventListener('resize', resize);
-  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
   /* ============================================================
      Canvas input (look + tap to place window)
@@ -912,24 +839,6 @@
   canvas.addEventListener('pointercancel', function () { pointerInfo = null; });
 
   /* ============================================================
-     FPS counter
-     ============================================================ */
-  let fpsFrames = 0;
-  let fpsLastUpdate = performance.now();
-
-  function updateFPS() {
-    fpsFrames++;
-    const nowMs = performance.now();
-    const elapsed = nowMs - fpsLastUpdate;
-    if (elapsed >= 500) {
-      const fps = Math.round(fpsFrames * 1000 / elapsed);
-      fpsEl.textContent = fps + ' FPS';
-      fpsFrames = 0;
-      fpsLastUpdate = nowMs;
-    }
-  }
-
-  /* ============================================================
      Render loop
      ============================================================ */
   let lastTime = performance.now();
@@ -943,11 +852,11 @@
     else if (lookMode) applyLook();
 
     if (started) {
-      updatePlayer(dt);
+      // Позиция камеры фиксирована — игрок стоит на месте, только осматривается.
+      camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
-      updateFPS();
     } else {
       camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     }
