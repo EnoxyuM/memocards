@@ -39,6 +39,7 @@
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
 
+  /* FPS counter — только текст, без рамки и фона */
   #fps-counter {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top, 0px));
@@ -46,16 +47,14 @@
     z-index: 25;
     color: #5ad0ff;
     font: 600 12px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    background: rgba(5, 8, 12, 0.78);
-    padding: 6px 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(90, 208, 255, 0.4);
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.3s ease;
-    min-width: 68px;
-    text-align: center;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.05em;
+    text-shadow:
+      0 0 1px #000,
+      0 0 3px #000,
+      0 0 6px rgba(90, 208, 255, 0.55);
   }
   #fps-counter.visible { opacity: 1; }
 
@@ -121,9 +120,30 @@
 
   const DEG = Math.PI / 180;
 
+  /* ============================================================
+     Device detection & performance options
+     ============================================================ */
+  const isMobile = (function () {
+    if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return true;
+    if (navigator.maxTouchPoints > 0 && window.matchMedia('(pointer: coarse)').matches) return true;
+    return false;
+  })();
+
+  // Кап DPR: на мобилках ниже, чтобы снизить fill-rate (главный тормоз)
+  const DPR_CAP = isMobile ? 1.5 : 2;
+
+  /* ============================================================
+     Renderer / Scene / Camera
+     ============================================================ */
   const canvas = document.getElementById('pano-canvas');
-  const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: !isMobile,          // MSAA на мобилках дорого + при высоком DPR не нужно
+    powerPreference: 'high-performance',
+    stencil: false,
+    depth: true
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
   renderer.setClearColor(0x0a0e14, 1);
 
   const scene = new THREE.Scene();
@@ -135,12 +155,18 @@
   const sun2 = new THREE.DirectionalLight(0xffffff, 0.25);
   sun2.position.set(-40, 40, -30); scene.add(sun2);
 
-  /* ============ World ============ */
+  /* ============================================================
+     World
+     ============================================================ */
   const CHUNK_SIZE = 16;
   const VIEW_DIST = 3;
   const MAX_WIN_DIST = 60;
   const worldSeed = Math.floor(Math.random() * 1000000);
   const chunks = new Map();
+
+  // Frustum-объекты для ручного отсечения чанков
+  const _frustum = new THREE.Frustum();
+  const _projScreenMatrix = new THREE.Matrix4();
 
   function hash2(x, z, seed) {
     let h = seed ^ Math.imul(x | 0, 0x27d4eb2d);
@@ -175,7 +201,7 @@
   const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
 
   function generateChunk(cx, cz) {
-    const chunk = { cx, cz, blocks: new Map(), mesh: null };
+    const chunk = { cx, cz, blocks: new Map(), mesh: null, boundingSphere: null, modified: false };
     const x0 = cx * CHUNK_SIZE, z0 = cz * CHUNK_SIZE;
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
@@ -194,30 +220,52 @@
   }
 
   function buildChunkMesh(chunk) {
-    if (chunk.mesh) { scene.remove(chunk.mesh); chunk.mesh = null; }
-    if (chunk.blocks.size === 0) return;
+    if (chunk.mesh) {
+      scene.remove(chunk.mesh);
+      chunk.mesh = null;
+    }
+    if (chunk.blocks.size === 0) { chunk.boundingSphere = null; return; }
+
     const groups = {};
     chunk.blocks.forEach((type, bkey) => {
       if (!groups[type]) groups[type] = [];
       groups[type].push(bkey);
     });
+
     const group = new THREE.Group();
+    group.matrixAutoUpdate = false;
+    group.updateMatrix();
+
     const dummy = new THREE.Object3D();
+    const bbox = new THREE.Box3();
+
     for (const typeStr in groups) {
       const type = +typeStr;
       const list = groups[type];
       const mat = blockMaterials[type] || blockMaterials[3];
       const mesh = new THREE.InstancedMesh(blockGeometry, mat, list.length);
-      mesh.frustumCulled = false;
+      mesh.frustumCulled = false;   // отсекаем на уровне чанка вручную
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
       for (let i = 0; i < list.length; i++) {
         const parts = list[i].split(',');
-        dummy.position.set(+parts[0] + 0.5, +parts[1] + 0.5, +parts[2] + 0.5);
+        const px = +parts[0] + 0.5, py = +parts[1] + 0.5, pz = +parts[2] + 0.5;
+        dummy.position.set(px, py, pz);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
+        bbox.expandByPoint(dummy.position);
       }
       mesh.instanceMatrix.needsUpdate = true;
       group.add(mesh);
     }
+
+    // Bounding sphere по всему чанку — включая пользовательские постройки
+    const center = new THREE.Vector3();
+    bbox.getCenter(center);
+    const size = new THREE.Vector3();
+    bbox.getSize(size);
+    chunk.boundingSphere = new THREE.Sphere(center, size.length() / 2 + 1);
+
     scene.add(group);
     chunk.mesh = group;
   }
@@ -228,6 +276,7 @@
     if (!chunk) { chunk = generateChunk(cx, cz); chunks.set(key, chunk); buildChunkMesh(chunk); }
     return chunk;
   }
+
   function getBlock(wx, wy, wz) {
     const cx = Math.floor(wx / CHUNK_SIZE);
     const cz = Math.floor(wz / CHUNK_SIZE);
@@ -235,19 +284,23 @@
     if (!chunk) return 0;
     return chunk.blocks.get(wx + ',' + wy + ',' + wz) || 0;
   }
+
   function setBlock(wx, wy, wz, type) {
     const cx = Math.floor(wx / CHUNK_SIZE);
     const cz = Math.floor(wz / CHUNK_SIZE);
     const key = cx + ',' + cz;
     let chunk = chunks.get(key);
-    if (!chunk) { chunk = { cx, cz, blocks: new Map(), mesh: null }; chunks.set(key, chunk); }
+    if (!chunk) { chunk = { cx, cz, blocks: new Map(), mesh: null, boundingSphere: null, modified: false }; chunks.set(key, chunk); }
     const bkey = wx + ',' + wy + ',' + wz;
     if (type === 0) { if (!chunk.blocks.has(bkey)) return; chunk.blocks.delete(bkey); }
     else { if (chunk.blocks.get(bkey) === type) return; chunk.blocks.set(bkey, type); }
+    chunk.modified = true;   // сохраняем такие чанки навсегда
     buildChunkMesh(chunk);
   }
 
-  /* ============ Player ============ */
+  /* ============================================================
+     Player
+     ============================================================ */
   const PLAYER_WIDTH = 0.6;
   const PLAYER_HEIGHT = 1.7;
   const EYE_HEIGHT = PLAYER_HEIGHT * 0.9;
@@ -342,8 +395,11 @@
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
   }
 
-  /* ============ Chunks ============ */
+  /* ============================================================
+     Chunks: load + unload
+     ============================================================ */
   let lastChunkCX = null, lastChunkCZ = null;
+
   function initialChunks() {
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
@@ -351,23 +407,55 @@
       for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) getChunk(pcx + dx, pcz + dz);
     lastChunkCX = pcx; lastChunkCZ = pcz;
   }
+
   function updateChunks() {
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
     if (pcx === lastChunkCX && pcz === lastChunkCZ) return;
     lastChunkCX = pcx; lastChunkCZ = pcz;
+
+    // Загрузка новых
     for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++)
       for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) {
         const cx = pcx + dx, cz = pcz + dz;
         if (!chunks.has(cx + ',' + cz)) getChunk(cx, cz);
       }
+
+    // Выгрузка: только немодифицированные и далеко
+    const unloadDist = VIEW_DIST + 2;
+    const toDelete = [];
+    chunks.forEach((chunk, key) => {
+      if (chunk.modified) return;
+      if (Math.abs(chunk.cx - pcx) > unloadDist || Math.abs(chunk.cz - pcz) > unloadDist) {
+        toDelete.push(key);
+      }
+    });
+    for (let i = 0; i < toDelete.length; i++) {
+      const key = toDelete[i];
+      const chunk = chunks.get(key);
+      if (chunk && chunk.mesh) scene.remove(chunk.mesh);
+      chunks.delete(key);
+    }
   }
 
-  /* ============ Block raycast / build / destroy ============ */
+  // Ручное фрустум-отсечение: один frustum-тест на чанк
+  function updateChunkVisibility() {
+    _projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_projScreenMatrix);
+    chunks.forEach((chunk) => {
+      if (!chunk.mesh) return;
+      if (!chunk.boundingSphere) { chunk.mesh.visible = true; return; }
+      chunk.mesh.visible = _frustum.intersectsSphere(chunk.boundingSphere);
+    });
+  }
+
+  /* ============================================================
+     Block raycast / build / destroy
+     ============================================================ */
   function raycastBlock(maxDist) {
     const dir = getCamDir().clone();
     const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
-    const step = 0.05;
+    const step = 0.1;                       // было 0.05 — вдвое меньше итераций
     let prev = { x: Math.floor(eye.x), y: Math.floor(eye.y), z: Math.floor(eye.z) };
     for (let t = 0; t <= maxDist; t += step) {
       const px = eye.x + dir.x * t, py = eye.y + dir.y * t, pz = eye.z + dir.z * t;
@@ -395,7 +483,9 @@
   }
   function doJump() { if (grounded) { playerVel.y = JUMP_VEL; grounded = false; } }
 
-  /* ============ Aim placement ============ */
+  /* ============================================================
+     Aim placement
+     ============================================================ */
   function getAimPlacement() {
     const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     const dir = getCamDir().clone();
@@ -424,15 +514,15 @@
     return { pos, normal, attached: false };
   }
 
-  /* ============ Windows ============ */
+  /* ============================================================
+     Windows
+     ============================================================ */
   const WIN_W = 1.0;
   const WIN_H = 0.75;
   const TEX_W = 512, TEX_H = 384;
   const WINDOW_FONT = '500 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
   const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
   const BTN_SIZE = 64, BTN_TOP = 8, BTN_RIGHT = 8, BTN_GAP = 3;
-
-  // Все кнопочные меши (hit / prog / ring) на одном z — 0.1% ширины окна вперёд.
   const BTN_Z = 0.001;
 
   function buttonRect(index) {
@@ -541,8 +631,6 @@
     const tex = new THREE.CanvasTexture(cv);
     tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
 
-    // Полигональный offset отодвигает лицо чуть вглубь, чтобы кнопки
-    // на BTN_Z=0.001 гарантированно проходили depth test.
     const face = new THREE.Mesh(
       new THREE.PlaneGeometry(WIN_W, WIN_H),
       new THREE.MeshBasicMaterial({
@@ -662,7 +750,9 @@
     }
   }
 
-  /* ============ Hover ============ */
+  /* ============================================================
+     Hover
+     ============================================================ */
   const raycaster = new THREE.Raycaster();
   const CENTER_NDC = new THREE.Vector2(0, 0);
 
@@ -737,7 +827,9 @@
     else if (id === 'flip') { win.flipped = !win.flipped; refreshWindow(win); }
   }
 
-  /* ============ Move / Resize ============ */
+  /* ============================================================
+     Move / Resize
+     ============================================================ */
   let mode = null;
   const MODE_TOL = 1.2 * DEG;
   const MODE_DURATION = 1.0;
@@ -829,7 +921,9 @@
     }
   }
 
-  /* ============ Text input ============ */
+  /* ============================================================
+     Text input
+     ============================================================ */
   let editInput = null, editingWin = null, lastEditEnd = 0;
 
   function ensureInput() {
@@ -923,7 +1017,9 @@
     try { editInput.blur(); } catch (e) {}
   }
 
-  /* ============ Gyro / fallback ============ */
+  /* ============================================================
+     Gyro / fallback
+     ============================================================ */
   let gyroOn = false, gyroFailed = false, requestInFlight = false, gotOrientation = false;
   const dev = { alpha: 0, beta: 0, gamma: 0 };
   let screenOrient = window.orientation || 0;
@@ -965,18 +1061,23 @@
   const _lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   function applyLook() { _lookEuler.set(lookPitch, lookYaw, 0, 'YXZ'); camera.quaternion.setFromEuler(_lookEuler); }
 
-  /* ============ Resize ============ */
+  /* ============================================================
+     Resize
+     ============================================================ */
   function resize() {
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
     if (w < 10) w = window.innerWidth;
     if (h < 10) h = window.innerHeight;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
 
-  /* ============ UI refs ============ */
+  /* ============================================================
+     UI refs
+     ============================================================ */
   const joystickEl = document.getElementById('joystick');
   const joystickKnob = document.getElementById('joystick-knob');
   const btnBuild = document.getElementById('btn-build');
@@ -986,15 +1087,12 @@
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
 
-  /* ============ Orientation handling ============ */
-  // Если ориентация меняется, пока палец на джойстике —
-  // откладываем "перекладывание" UI до момента отпускания.
+  /* ============================================================
+     Orientation
+     ============================================================ */
   let orientationPending = false;
 
   function forceReflowUI() {
-    // Принудительный пересчёт layout для всех fixed-элементов.
-    // Без этого некоторые браузеры (iOS Safari) оставляют
-    // fixed-элементы в старых позициях на мгновение.
     void joystickEl.offsetHeight;
     void btnBuild.offsetHeight;
     void btnDestroy.offsetHeight;
@@ -1007,28 +1105,26 @@
     screenOrient = window.orientation || 0;
 
     if (joystickActive) {
-      // Заморозить движение во время смены ориентации
       orientationPending = true;
       joystickVec.x = 0;
       joystickVec.z = 0;
     } else {
-      // Сразу всё пересчитываем
       forceReflowUI();
     }
 
-    // Пересчёт рендерера с задержкой — у некоторых телефонов
-    // новая ширина/высота появляются чуть позже события.
     setTimeout(resize, 50);
     setTimeout(resize, 250);
     setTimeout(forceReflowUI, 300);
   });
 
-  /* ============ Joystick ============ */
+  /* ============================================================
+     Joystick
+     ============================================================ */
   const joystickVec = { x: 0, z: 0 };
   let joystickActive = false, joystickPointerId = null;
 
   function updateJoystickPos(e) {
-    if (orientationPending) return;   // заморожено на время смены ориентации
+    if (orientationPending) return;
     const rect = joystickEl.getBoundingClientRect();
     const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     let dx = e.clientX - cx, dy = e.clientY - cy;
@@ -1046,7 +1142,6 @@
     joystickKnob.style.transform = 'translate(0, 0)';
     if (orientationPending) {
       orientationPending = false;
-      // Только сейчас "перекладываем" кнопки под новую ориентацию.
       forceReflowUI();
     }
   }
@@ -1066,7 +1161,9 @@
   });
   joystickEl.addEventListener('pointercancel', resetJoystick);
 
-  /* ============ Action buttons ============ */
+  /* ============================================================
+     Action buttons
+     ============================================================ */
   function bindTap(el, fn) {
     el.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
   }
@@ -1074,7 +1171,9 @@
   bindTap(btnDestroy, destroyBlock);
   bindTap(btnJump, doJump);
 
-  /* ============ Start / canvas input ============ */
+  /* ============================================================
+     Start / canvas input
+     ============================================================ */
   let started = false, consumeNextTap = false;
 
   function begin() {
@@ -1139,7 +1238,9 @@
   });
   canvas.addEventListener('pointercancel', function () { pointerInfo = null; });
 
-  /* ============ FPS counter ============ */
+  /* ============================================================
+     FPS counter
+     ============================================================ */
   let fpsFrames = 0;
   let fpsLastUpdate = performance.now();
 
@@ -1155,7 +1256,9 @@
     }
   }
 
-  /* ============ Render loop ============ */
+  /* ============================================================
+     Render loop
+     ============================================================ */
   let lastTime = performance.now();
   function render(now) {
     requestAnimationFrame(render);
@@ -1169,6 +1272,7 @@
     if (started) {
       updatePlayer(dt);
       updateChunks();
+      updateChunkVisibility();
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
