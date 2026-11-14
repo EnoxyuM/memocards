@@ -6,34 +6,20 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>360</title>
 <style>
-  html, body {
-    margin: 0; padding: 0;
-    width: 100%; height: 100%;
-    overflow: hidden;
-    background: #000;
-    -webkit-tap-highlight-color: transparent;
-    user-select: none; -webkit-user-select: none;
-  }
-  #pano-canvas {
-    display: block;
-    width: 100%; height: 100%;
-    touch-action: none;
-  }
+  html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000;
+    -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none; }
+  #pano-canvas { display:block; width:100%; height:100%; touch-action:none; }
 </style>
 </head>
 <body>
 <canvas id="pano-canvas"></canvas>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function () {
   'use strict';
-
   if (typeof THREE === 'undefined') return;
 
-  /* ============================================================
-     Тестовая панорама
-     ============================================================ */
+  /* ---- Тестовая панорама ---- */
   function generateTestPano() {
     const W = 2048, H = 1024;
     const cv = document.createElement('canvas');
@@ -56,30 +42,21 @@
     ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
 
     ctx.font = 'bold 140px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = 'black';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8; ctx.strokeStyle = 'black';
     [
-      ['FRONT',  W/2,   H/2],
-      ['LEFT',   W/4,   H/2],
-      ['RIGHT',  3*W/4, H/2],
-      ['BACK',   0,     H/2],
-      ['BACK',   W,     H/2],
-      ['TOP',    W/2,   H*0.10],
-      ['BOTTOM', W/2,   H*0.90]
+      ['FRONT',  W/2,   H/2], ['LEFT',   W/4,   H/2], ['RIGHT',  3*W/4, H/2],
+      ['BACK',   0,     H/2], ['BACK',   W,     H/2],
+      ['TOP',    W/2,   H*0.10], ['BOTTOM', W/2,   H*0.90]
     ].forEach(function (l) {
       ctx.strokeText(l[0], l[1], l[2]);
       ctx.fillStyle = 'white';
       ctx.fillText(l[0], l[1], l[2]);
     });
-
     return cv;
   }
 
-  /* ============================================================
-     Three.js
-     ============================================================ */
+  /* ---- Three.js ---- */
   const canvas = document.getElementById('pano-canvas');
   const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -96,12 +73,9 @@
     new THREE.SphereGeometry(500, 60, 40),
     new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
   );
-  sphere.rotation.y = Math.PI / 2;   // FRONT перед камерой
+  sphere.rotation.y = Math.PI / 2;
   scene.add(sphere);
 
-  /* ============================================================
-     Resize
-     ============================================================ */
   function resize() {
     let w = canvas.clientWidth  || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
@@ -112,48 +86,52 @@
     camera.updateProjectionMatrix();
   }
   window.addEventListener('resize', resize);
-  window.addEventListener('orientationchange', function () {
-    setTimeout(resize, 250);
-  });
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
   /* ============================================================
-     Гироскоп — только данные из событий, без флагов
+     ГИРОСКОП — ОДИН источник, залочен после первых валидных данных
      ============================================================ */
   const dev = { alpha: 0, beta: 0, gamma: 0 };
-  let gotGyroData = false;
+  let gotGyroData   = false;
+  let lockedSource  = null;          // 'absolute' | 'relative' | null
   let permissionGranted = false;
-  let requestInFlight = false;
+  let requestInFlight   = false;
   let screenOrient = window.orientation || 0;
 
-  function onOrient(e) {
-    // Принимаем только реальные числа (на десктопе часто null)
+  function acceptEvent(e) {
+    // только реальные числа (null/undefined → отбрасываем)
     if (typeof e.alpha !== 'number' ||
         typeof e.beta  !== 'number' ||
-        typeof e.gamma !== 'number') return;
-
+        typeof e.gamma !== 'number') return false;
     dev.alpha = e.alpha;
     dev.beta  = e.beta;
     dev.gamma = e.gamma;
-
     if (!gotGyroData) {
       gotGyroData = true;
-      console.log('[pano] gyroscope data arrived');
+      console.log('[pano] gyro locked to:', lockedSource);
     }
+    return true;
   }
 
-  window.addEventListener('deviceorientation', onOrient);
-  window.addEventListener('deviceorientationabsolute', onOrient);
+  window.addEventListener('deviceorientationabsolute', function (e) {
+    if (lockedSource === 'relative') return;            // уже выбрали relative — игнор
+    if (lockedSource === 'absolute') { acceptEvent(e); return; }
+    if (acceptEvent(e)) lockedSource = 'absolute';      // первый валидный — фиксируем
+  });
+
+  window.addEventListener('deviceorientation', function (e) {
+    if (lockedSource === 'absolute') return;            // уже выбрали absolute — игнор
+    if (lockedSource === 'relative') { acceptEvent(e); return; }
+    if (acceptEvent(e)) lockedSource = 'relative';      // первый валидный — фиксируем
+  });
 
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
   });
 
-  // iOS 13+ требует requestPermission из жеста.
-  // Chrome Android 119+ — просто требует любой жест (его не запрашиваем,
-  // просто ждём, пока браузер сам разблокирует события после тапа).
+  /* ---- iOS 13+: requestPermission из жеста ---- */
   function tryEnableGyro() {
     if (permissionGranted || requestInFlight) return;
-
     if (typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
       requestInFlight = true;
@@ -164,24 +142,21 @@
         })
         .catch(function () { requestInFlight = false; });
     } else {
-      permissionGranted = true;
+      permissionGranted = true;   // Android: жест всё равно нужен браузеру, но не нам
     }
   }
-
   tryEnableGyro();
   document.addEventListener('touchstart',  tryEnableGyro, { passive: true });
   document.addEventListener('pointerdown', tryEnableGyro);
   document.addEventListener('click',       tryEnableGyro);
   document.addEventListener('keydown',     tryEnableGyro);
 
-  /* ============================================================
-     Применение гироскопа к камере
-     ============================================================ */
-  const DEG    = Math.PI / 180;
-  const ZEE    = new THREE.Vector3(0, 0, 1);
+  /* ---- Применение к камере ---- */
+  const DEG = Math.PI / 180;
+  const ZEE = new THREE.Vector3(0, 0, 1);
   const _euler = new THREE.Euler();
-  const Q0     = new THREE.Quaternion();
-  const Q1     = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+  const Q0 = new THREE.Quaternion();
+  const Q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 
   function applyGyro() {
     _euler.set(dev.beta * DEG, dev.alpha * DEG, -dev.gamma * DEG, 'YXZ');
@@ -191,21 +166,13 @@
     camera.quaternion.multiply(Q0);
   }
 
-  /* ============================================================
-     Рендер
-     ============================================================ */
+  /* ---- Рендер ---- */
   function render() {
     requestAnimationFrame(render);
-
-    // пока данных нет — камера смотрит на FRONT (rotation 0,0,0)
     if (gotGyroData) applyGyro();
-
     renderer.render(scene, camera);
   }
 
-  /* ============================================================
-     Старт
-     ============================================================ */
   resize();
   setTimeout(resize, 50);
   setTimeout(resize, 200);
