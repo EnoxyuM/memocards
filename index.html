@@ -264,7 +264,7 @@
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.6.3</div>
+  <div id="start-version">v1.6.4</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -277,7 +277,7 @@
   /* ============================================================
      VERSION
      ============================================================ */
-  const VERSION = '1.6.3';
+  const VERSION = '1.6.4';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -362,16 +362,6 @@
   function recentUITap() { return performance.now() - uiTapTime < UI_TAP_GUARD_MS; }
 
   /* ============================================================
-     Editing guard — блокирует любые перерасчёты на время и после ввода
-     ============================================================ */
-  let lastEditEnd = 0;
-  function recentlyEdited() {
-    if (editingWin) return true;
-    if (performance.now() - lastEditEnd < 500) return true;
-    return false;
-  }
-
-  /* ============================================================
      Settings
      ============================================================ */
   const burgerBtn = document.getElementById('burger-btn');
@@ -435,7 +425,7 @@
   });
 
   document.addEventListener('pointerdown', function (e) {
-    if (burgerBtn.contains(e.target) || burgerMenu.contains(e.target) || (editInput && editInput.contains(e.target))) {
+    if (burgerBtn.contains(e.target) || burgerMenu.contains(e.target)) {
       markUITap();
     }
     if (!isMenuOpen()) return;
@@ -486,8 +476,6 @@
 
   videoEl.addEventListener('loadedmetadata', updateVideoFit);
   videoEl.addEventListener('canplay', updateVideoFit);
-  // Android иногда ставит video на паузу после фокуса input / системных событий —
-  // принудительно возвращаем воспроизведение, чтобы не было чёрного кадра.
   videoEl.addEventListener('pause', function () {
     if (!started) return;
     if (document.hidden) return;
@@ -755,7 +743,6 @@
     const i = windows.indexOf(win);
     if (i !== -1) windows.splice(i, 1);
     if (mode && mode.win === win) { mode = null; hideModeVisuals(); }
-    if (editingWin === win) cancelEdit();
   }
 
   function updateWindowVisibility() {
@@ -815,7 +802,7 @@
   }
 
   function updateHover(dt) {
-    if (mode || editingWin || isMenuOpen()) { clearAllButtonVisuals(); return; }
+    if (mode || isMenuOpen()) { clearAllButtonVisuals(); return; }
     const found = getButtonUnderCrosshair();
 
     for (let i = 0; i < windows.length; i++) {
@@ -946,106 +933,21 @@
   }
 
   /* ============================================================
-     Text input
+     Text input — нативный prompt() вместо HTML textarea
+     (обходит баг Chrome WebXR DOM Overlay flicker)
      ============================================================ */
-  let editInput = null, editingWin = null;
-
-  function ensureInput() {
-    if (editInput) return editInput;
-    editInput = document.createElement('textarea');
-    editInput.id = 'window-text-input';
-    editInput.autocomplete = 'off';
-    editInput.spellcheck = false;
-    editInput.setAttribute('autocorrect', 'off');
-    editInput.setAttribute('autocapitalize', 'sentences');
-    editInput.rows = 3;
-    Object.assign(editInput.style, {
-      position: 'fixed',
-      left: '50%',
-      top: '72px',
-      transform: 'translateX(-50%) translate3d(0, 0, 0)',
-      width: '78%', maxWidth: '440px', boxSizing: 'border-box',
-      padding: '14px 18px', fontSize: '20px',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-      background: '#0d0d11', color: '#e9f8ff',
-      border: '2px solid #5ad0ff', borderRadius: '10px',
-      boxShadow: '0 0 24px rgba(90,208,255,0.55)',
-      zIndex: 100, outline: 'none', display: 'none',
-      caretColor: '#5ad0ff', resize: 'none',
-      lineHeight: '1.35', minHeight: '80px', maxHeight: '42vh', overflowY: 'auto',
-      backfaceVisibility: 'hidden',
-      WebkitBackfaceVisibility: 'hidden'
-    });
-    document.body.appendChild(editInput);
-    editInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-    });
-    editInput.addEventListener('blur', function () {
-      // 300 мс — чтобы краткие «мигания» фокуса GBoard не считались завершением
-      setTimeout(function () {
-        if (editingWin && document.activeElement !== editInput) commitEdit();
-      }, 300);
-    });
-    return editInput;
-  }
-
-  let warmInput = null;
-  function warmUpKeyboard() {
-    if (warmInput) return;
-    warmInput = document.createElement('input');
-    warmInput.type = 'text'; warmInput.setAttribute('autocomplete', 'off');
-    Object.assign(warmInput.style, {
-      position: 'fixed', left: '50%', top: '0', width: '1px', height: '1px',
-      padding: '0', border: 'none', outline: 'none', opacity: '0',
-      pointerEvents: 'none', zIndex: -1
-    });
-    document.body.appendChild(warmInput);
-    try { warmInput.focus(); } catch (e) {}
-    setTimeout(function () { try { warmInput.blur(); } catch (e) {} }, 30);
-  }
+  let editingWin = null;
 
   function editText(win) {
-    ensureInput();
     editingWin = win;
-    const p = palette(win.flipped);
-    editInput.style.borderColor = p.accent;
-    editInput.style.boxShadow = '0 0 24px ' + (win.flipped ? 'rgba(255,126,193,0.55)' : 'rgba(90,208,255,0.55)');
-    editInput.style.caretColor = p.accent;
-    editInput.style.color = win.flipped ? '#f5dce8' : '#e9f8ff';
-    editInput.value = win.flipped ? win.textBack : win.textFront;
-    editInput.style.display = 'block';
-    const tryFocus = function () {
-      try {
-        editInput.focus({ preventScroll: true });
-        const len = editInput.value.length;
-        editInput.setSelectionRange(len, len);
-      } catch (e) {}
-    };
-    tryFocus();
-    requestAnimationFrame(tryFocus);
-    setTimeout(tryFocus, 20);
-    setTimeout(tryFocus, 80);
-    setTimeout(tryFocus, 200);
-  }
-  function commitEdit() {
-    if (!editingWin || !editInput) return;
-    const win = editingWin;
+    const current = win.flipped ? win.textBack : win.textFront;
+    const result = window.prompt('Введите текст для окна:', current);
+    if (result !== null && result !== current) {
+      if (win.flipped) win.textBack = result;
+      else win.textFront = result;
+      refreshWindow(win);
+    }
     editingWin = null;
-    lastEditEnd = performance.now();
-    const value = editInput.value;
-    if (win.flipped) win.textBack = value; else win.textFront = value;
-    refreshWindow(win);
-    editInput.style.display = 'none';
-    try { editInput.blur(); } catch (e) {}
-    setTimeout(resize, 500);
-  }
-  function cancelEdit() {
-    if (!editInput) return;
-    editingWin = null;
-    lastEditEnd = performance.now();
-    editInput.style.display = 'none';
-    try { editInput.blur(); } catch (e) {}
-    setTimeout(resize, 500);
   }
 
   /* ============================================================
@@ -1091,13 +993,12 @@
   function applyLook() { _lookEuler.set(lookPitch, lookYaw, 0, 'YXZ'); camera.quaternion.setFromEuler(_lookEuler); }
 
   /* ============================================================
-     Resize (двойная защита от keyboard-flicker)
+     Resize
      ============================================================ */
   let lastResizeW = 0, lastResizeH = 0;
 
   function resize() {
     if (renderer.xr.isPresenting) return;
-    if (recentlyEdited()) return;
 
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
@@ -1117,7 +1018,6 @@
 
   let resizeTimer = null;
   function scheduleResize() {
-    if (recentlyEdited()) return;
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(resize, 100);
   }
@@ -1138,7 +1038,7 @@
      ============================================================ */
   function updateHUD() {
     if (!started) { hudEl.classList.remove('visible'); return; }
-    if (recentlyEdited()) return;
+    if (editingWin) return;
     hudEl.classList.add('visible');
     const pos = xrMode ? _xrViewerPos : getEye();
     const moving = xrViewerPosChanges > 5;
@@ -1263,7 +1163,7 @@
     if (!started) return;
     if (recentUITap()) return;
     if (isMenuOpen()) return;
-    if (recentlyEdited()) return;
+    if (editingWin) return;
 
     const found = getButtonUnderCrosshair();
     if (found) {
@@ -1273,7 +1173,6 @@
       return;
     }
     if (mode) { mode = null; hideModeVisuals(); return; }
-    if (editingWin) { commitEdit(); return; }
     createWindowCenter();
   }
 
@@ -1317,7 +1216,7 @@
       }
     }
 
-    if (started && !recentlyEdited()) {
+    if (started && !editingWin) {
       const dt = 1 / 60;
       updateHover(dt);
       updateMode(dt);
@@ -1343,7 +1242,7 @@
 
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
 
-    if (started && !recentlyEdited()) {
+    if (started && !editingWin) {
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
@@ -1386,7 +1285,6 @@
     startScreen.classList.add('hidden');
     crosshair.classList.add('visible');
     burgerBtn.classList.add('active');
-    warmUpKeyboard();
     resize();
   }
 
@@ -1417,7 +1315,6 @@
   canvas.addEventListener('pointerdown', function (e) {
     if (!started || xrMode) return;
     if (recentUITap()) { consumeNextTap = true; return; }
-    if (editingWin) { commitEdit(); consumeNextTap = true; return; }
     pointerInfo = {
       id: e.pointerId, lastX: e.clientX, lastY: e.clientY,
       moved: 0, t: performance.now()
@@ -1445,7 +1342,6 @@
     pointerInfo = null;
     if (!started || xrMode) return;
     if (recentUITap()) return;
-    if (performance.now() - lastEditEnd < 300) return;
     if (info.moved < 12 && performance.now() - info.t < 700) {
       if (mode) { mode = null; hideModeVisuals(); }
       else if (!editingWin) createWindowCenter();
