@@ -12,16 +12,13 @@ html,body{height:100%;overflow:hidden;background:#0a0c0f;color:#cfd8e3;
   overscroll-behavior:none;touch-action:none}
 #world{position:fixed;inset:0;overflow:hidden;cursor:grab}
 #world:active{cursor:grabbing}
-#cross{position:fixed;left:50%;top:50%;width:24px;height:24px;margin:-12px 0 0 -12px;
-  pointer-events:none;z-index:9999}
+#cross{position:fixed;left:0;top:0;width:24px;height:24px;pointer-events:none;z-index:9999;will-change:transform}
 .win{position:absolute;left:0;top:0;display:flex;flex-direction:column;overflow:hidden;
   border-radius:10px;background:#151a21;border:1px solid #2b3542;
   box-shadow:0 12px 34px rgba(0,0,0,.6);will-change:transform;
   transition:background .25s ease,border-color .25s ease,box-shadow .18s ease}
 .win.flipped{background:#1a2531;border-color:#3a5470}
 .win.moving,.win.resizing{box-shadow:0 0 0 1.5px rgba(110,200,255,.6),0 12px 34px rgba(0,0,0,.6)}
-.win.moving{cursor:move}
-.win.resizing{cursor:nwse-resize}
 .bar{flex:0 0 28px;height:28px;display:flex;align-items:center;justify-content:flex-end;
   gap:4px;padding:0 6px;background:rgba(255,255,255,.035);border-bottom:1px solid rgba(255,255,255,.05)}
 .btn{position:relative;width:20px;height:20px;display:grid;place-items:center;border:0;border-radius:50%;
@@ -44,21 +41,6 @@ html,body{height:100%;overflow:hidden;background:#0a0c0f;color:#cfd8e3;
 .face.back{display:none}
 .win.flipped .face.front{display:none}
 .win.flipped .face.back{display:block}
-
-/* --- long-press menu --- */
-#menu{position:fixed;z-index:10000;min-width:170px;padding:8px 0;border-radius:12px;
-  background:#1b232d;border:1px solid #33414f;box-shadow:0 18px 44px rgba(0,0,0,.7);
-  display:none;flex-direction:column;backdrop-filter:blur(12px)}
-#menu.open{display:flex}
-.mi{display:flex;align-items:center;gap:10px;padding:9px 14px;color:#dbe6f2;
-  font-size:14px;cursor:pointer;white-space:nowrap}
-.mi:hover{background:rgba(255,255,255,.07)}
-.mi input{appearance:none;-webkit-appearance:none;width:16px;height:16px;margin:0;
-  border:1.5px solid #5a728a;border-radius:4px;display:grid;place-items:center;
-  background:transparent;cursor:pointer;flex:0 0 auto}
-.mi input:checked{background:#4ea8de;border-color:#4ea8de}
-.mi input:checked::after{content:"";width:8px;height:4px;border-left:2px solid #0a0c0f;
-  border-bottom:2px solid #0a0c0f;transform:rotate(-45deg) translate(0.5px,-1px)}
 </style>
 </head>
 <body>
@@ -77,85 +59,210 @@ html,body{height:100%;overflow:hidden;background:#0a0c0f;color:#cfd8e3;
     <circle cx="12" cy="12" r="1.1" fill="#7fd4ff" opacity="0.9"/>
   </svg>
 </div>
-<div id="menu">
-  <label class="mi"><input type="checkbox" id="invX">invert X</label>
-  <label class="mi"><input type="checkbox" id="invY">invert Y</label>
-</div>
 <script>
 (function(){
 'use strict';
 
-var worldEl = document.getElementById('world');
-var ringEl  = document.getElementById('ring');
-var menuEl  = document.getElementById('menu');
-var invXEl  = document.getElementById('invX');
-var invYEl  = document.getElementById('invY');
-var MOBILE  = matchMedia('(hover: none) and (pointer: coarse)').matches;
+const worldEl = document.getElementById('world');
+const crossEl = document.getElementById('cross');
+const ringEl  = document.getElementById('ring');
+const MOBILE  = matchMedia('(hover: none) and (pointer: coarse)').matches;
 
-var camX = 0, camY = 0;
-var wins = [];
-var idc  = 0;
-var db   = null;
+// ---- constants (KRPano-like drag feel)
+const MAX_TILT_DEG = 24;
+const DEAD_ZONE    = 0.18;
+const DRAG_FRICTION = 0.92;      // per frame velocity decay while dragging
+const INERTIA_FRICTION = 0.94;   // after release
+const DRAG_SCALE   = 1.0;        // 1:1 pixel-to-pixel
+const SENSOR_FILTER= 0.16;
+const CALIB_SAMPLES= 25;
+const RING_LEN     = 65.97;
+const STILL_MS     = 1000;
+const BOTTOM_FRAC  = 0.15;
+const BOTTOM_DBL_MS= 300;
 
-var modeWin      = null;
-var stillStart   = 0;
-var stillCamX    = 0;
-var stillCamY    = 0;
-var lastModeSave = 0;
+// ---- state
+let camX = 0, camY = 0;
+let camVelX = 0, camVelY = 0;
+let wins = [];
+let idc  = 0;
+let db   = null;
+let drag = null;               // window move/resize drag
+let modeWin = null;
+let modeStillStart = 0;
+let modeStillCamX = 0;
+let modeStillCamY = 0;
 
-var invertX = false, invertY = false;
-var RING_LEN = 65.97;
+// pan drag (KRPano style)
+let panDrag = null;
 
-/* ---------------- IndexedDB ---------------- */
-var dbReq = indexedDB.open('wins360', 1);
-dbReq.onupgradeneeded = function(e){
-  var d = e.target.result;
-  if (!d.objectStoreNames.contains('w')) d.createObjectStore('w', { keyPath: 'id' });
+// sensor
+const sensorState = { motionEnabled:false, hasAccel:false, baseSet:false, samples:[],
+  accel:{x:0,y:0,z:0}, baseMatrix:null, baseTargetZ:1 };
+
+// mouse (for PC crosshair + joystick fallback)
+const mouse = { x:0, y:0, sx:0, sy:0, active:false };
+
+// ---- math helpers
+const clamp  = (v,a,b)=>Math.max(a,Math.min(b,v));
+const norm3  = v=>{const l=Math.hypot(v.x,v.y,v.z); return l<1e-9?null:{x:v.x/l,y:v.y/l,z:v.z/l};};
+const dot3   = (a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const cross3 = (a,b)=>({x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x});
+const identM3= ()=>[1,0,0, 0,1,0, 0,0,1];
+function axisAngleM3(ax,ang){
+  const x=ax.x,y=ax.y,z=ax.z,c=Math.cos(ang),s=Math.sin(ang),t=1-c;
+  return [t*x*x+c, t*x*y-s*z, t*x*z+s*y,
+          t*x*y+s*z, t*y*y+c, t*y*z-s*x,
+          t*x*z-s*y, t*y*z+s*x, t*z*z+c];
+}
+function matFromTo(f,t){
+  const a=norm3(f), b=norm3(t);
+  if(!a||!b) return identM3();
+  const d=clamp(dot3(a,b),-1,1);
+  if(d>0.99999) return identM3();
+  if(d<-0.99999) return axisAngleM3({x:1,y:0,z:0},Math.PI);
+  const ax=norm3(cross3(a,b));
+  return ax?axisAngleM3(ax,Math.acos(d)):identM3();
+}
+function applyM3(m,v){
+  return { x:m[0]*v.x+m[1]*v.y+m[2]*v.z,
+           y:m[3]*v.x+m[4]*v.y+m[5]*v.z,
+           z:m[6]*v.x+m[7]*v.y+m[8]*v.z };
+}
+
+// ---- sensor
+function onMotion(ev){
+  if(!sensorState.motionEnabled) return;
+  const g=ev.accelerationIncludingGravity;
+  if(!g||!isFinite(g.x)||!isFinite(g.y)||!isFinite(g.z)) return;
+  if(!sensorState.hasAccel){
+    sensorState.accel={x:g.x,y:g.y,z:g.z};
+    sensorState.hasAccel=true;
+  } else {
+    sensorState.accel.x+=(g.x-sensorState.accel.x)*SENSOR_FILTER;
+    sensorState.accel.y+=(g.y-sensorState.accel.y)*SENSOR_FILTER;
+    sensorState.accel.z+=(g.z-sensorState.accel.z)*SENSOR_FILTER;
+  }
+  if(!sensorState.baseSet){
+    sensorState.samples.push({x:sensorState.accel.x,y:sensorState.accel.y,z:sensorState.accel.z});
+    if(sensorState.samples.length>=CALIB_SAMPLES){
+      let sx=0,sy=0,sz=0;
+      for(const s of sensorState.samples){sx+=s.x;sy+=s.y;sz+=s.z;}
+      const n=sensorState.samples.length;
+      const av=norm3({x:sx/n,y:sy/n,z:sz/n});
+      if(av){
+        const tz=av.z>=0?1:-1;
+        sensorState.baseTargetZ=tz;
+        sensorState.baseMatrix=matFromTo(av,{x:0,y:0,z:tz});
+        sensorState.baseSet=true;
+      }
+      sensorState.samples=[];
+    }
+  }
+}
+function sensorTilt(){
+  if(!sensorState.hasAccel||!sensorState.baseSet||!sensorState.baseMatrix) return null;
+  const c=norm3(sensorState.accel); if(!c) return null;
+  const v=applyM3(sensorState.baseMatrix,c);
+  const sx=clamp(-v.x*sensorState.baseTargetZ,-1,1);
+  const sy=clamp( v.y*sensorState.baseTargetZ,-1,1);
+  return { tx:Math.asin(sx)*180/Math.PI, ty:Math.asin(sy)*180/Math.PI };
+}
+function recalibrateTilt(){
+  if(!sensorState.hasAccel) return;
+  const c=norm3(sensorState.accel); if(!c) return;
+  const tz=c.z>=0?1:-1;
+  sensorState.baseTargetZ=tz;
+  sensorState.baseMatrix=matFromTo(c,{x:0,y:0,z:tz});
+  sensorState.baseSet=true;
+  camVelX=0; camVelY=0;
+}
+async function requestMotion(){
+  if(typeof DeviceMotionEvent==='undefined') return;
+  try{
+    if(typeof DeviceMotionEvent.requestPermission==='function'){
+      const r=await DeviceMotionEvent.requestPermission();
+      if(r!=='granted') return;
+    }
+    sensorState.motionEnabled=true;
+    window.addEventListener('devicemotion',onMotion);
+  }catch(e){}
+}
+
+// ---- tilt input (normalized -1..1)
+function currentTilt(){
+  if(sensorState.motionEnabled&&sensorState.baseSet){
+    const s=sensorTilt();
+    if(s){
+      const deadDeg=MAX_TILT_DEG*DEAD_ZONE;
+      const mag=Math.hypot(s.tx,s.ty);
+      if(mag<deadDeg) return {tx:0,ty:0};
+      let tx=s.tx/MAX_TILT_DEG, ty=s.ty/MAX_TILT_DEG;
+      const m=Math.hypot(tx,ty);
+      if(m>1){tx/=m;ty/=m;}
+      return {tx,ty};
+    }
+  }
+  // mouse joystick fallback (PC when not dragging)
+  let mx=mouse.active?mouse.x:0;
+  let my=mouse.active?mouse.y:0;
+  const mag=Math.hypot(mx,my);
+  if(mag<DEAD_ZONE) return {tx:0,ty:0};
+  if(mag>1){mx/=mag;my/=mag;}
+  return {tx:mx,ty:my};
+}
+
+window.addEventListener('mousemove',e=>{
+  mouse.sx=e.clientX; mouse.sy=e.clientY;
+  mouse.x=(e.clientX/window.innerWidth -0.5)*2;
+  mouse.y=(e.clientY/window.innerHeight-0.5)*2;
+  mouse.active=true;
+});
+
+// ---- IndexedDB
+const dbReq=indexedDB.open('wins360',1);
+dbReq.onupgradeneeded=e=>{
+  const d=e.target.result;
+  if(!d.objectStoreNames.contains('w')) d.createObjectStore('w',{keyPath:'id'});
 };
-dbReq.onsuccess = function(e){
-  db = e.target.result;
-  try {
-    var rq = db.transaction('w', 'readonly').objectStore('w').getAll();
-    rq.onsuccess = function(){
-      (rq.result || []).forEach(function(rec){
-        var a = rec.a || [];
-        var front = '', back = '';
-        if (a.length >= 8)      { front = a[6] || ''; back = a[7] || ''; }
-        else if (a.length === 7){ front = a[5] || ''; back = a[6] || ''; }
-        createWindow(a[0] || 0, a[1] || 0, {
+dbReq.onsuccess=e=>{
+  db=e.target.result;
+  try{
+    const rq=db.transaction('w','readonly').objectStore('w').getAll();
+    rq.onsuccess=()=>{
+      (rq.result||[]).forEach(rec=>{
+        const a=rec.a||[];
+        createWindow(a[0]||0, a[1]||0, {
           id: rec.id, w: a[2], h: a[3], flip: !!a[4],
-          front: front, back: back
+          front: a[5]||'', back: a[6]||''
         });
       });
     };
-  } catch(err){}
+  }catch(err){}
 };
-
-var saveTimers = {};
+const saveTimers={};
 function scheduleSave(o){
   clearTimeout(saveTimers[o.id]);
-  saveTimers[o.id] = setTimeout(function(){ saveNow(o); }, 300);
+  saveTimers[o.id]=setTimeout(()=>saveNow(o),300);
 }
 function saveNow(o){
-  if (!db) return;
-  try {
-    db.transaction('w', 'readwrite').objectStore('w').put({
-      id: o.id,
-      a: [ Math.round(o.x), Math.round(o.y), Math.round(o.w), Math.round(o.h),
-           o.flip ? 1 : 0, o.frontEl.innerHTML, o.backEl.innerHTML ]
+  if(!db) return;
+  try{
+    db.transaction('w','readwrite').objectStore('w').put({
+      id:o.id,
+      a:[Math.round(o.x),Math.round(o.y),Math.round(o.w),Math.round(o.h),
+         o.flip?1:0, o.frontEl.innerHTML, o.backEl.innerHTML]
     });
-  } catch(err){}
+  }catch(err){}
 }
 function removeRec(id){
-  if (!db) return;
-  try { db.transaction('w', 'readwrite').objectStore('w').delete(id); } catch(err){}
+  if(!db) return;
+  try{db.transaction('w','readwrite').objectStore('w').delete(id);}catch(err){}
 }
 
-/* ---------------- icons ---------------- */
-function svg(inner){
-  return '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round">'+inner+'</svg>';
-}
-var ICONS = {
+// ---- icons
+const svg = s=>'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round">'+s+'</svg>';
+const ICONS = {
   flip:   svg('<polygon class="star" points="6,1 7.35,4.35 10.9,4.65 8.25,7.1 9.05,10.6 6,8.85 2.95,10.6 3.75,7.1 1.1,4.65 4.65,4.35"/>'),
   edit:   svg('<circle cx="6" cy="6" r="4.2"/>'),
   resize: svg('<polygon points="6,1.5 11,10.3 1,10.3"/>'),
@@ -163,475 +270,332 @@ var ICONS = {
   close:  svg('<path d="M2.7 2.7 L9.3 9.3 M9.3 2.7 L2.7 9.3" stroke-linecap="round"/>')
 };
 
-/* ---------------- PC drag (press & hold button) ---------------- */
-var drag = null;
+// ---- window
+function createWindow(x,y,o){
+  o=o||{};
+  const id=(o.id!=null)?o.id:++idc;
+  if(o.id!=null) idc=Math.max(idc,o.id);
 
-function startDrag(o, kind, e){
-  if (drag) endDrag();
-  if (modeWin) applyMode(modeWin, null);
-  drag = { o: o, kind: kind, sx: e.clientX, sy: e.clientY,
-           x0: o.x, y0: o.y, w0: o.w, h0: o.h };
-  o.el.classList.add(kind === 'move' ? 'moving' : 'resizing');
-}
-
-function endDrag(){
-  if (!drag) return;
-  var o = drag.o;
-  drag = null;
-  o.el.classList.remove('moving', 'resizing');
-  saveNow(o);
-}
-
-/* ---------------- window ---------------- */
-function createWindow(x, y, o){
-  o = o || {};
-  var id = (o.id != null) ? o.id : ++idc;
-  if (o.id != null) idc = Math.max(idc, o.id);
-
-  var el = document.createElement('div');
-  el.className = 'win' + (o.flip ? ' flipped' : '');
+  const el=document.createElement('div');
+  el.className='win'+(o.flip?' flipped':'');
   el.innerHTML =
-    '<div class="bar">' +
-      '<button class="btn" data-act="flip">'   + ICONS.flip   + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="edit">'   + ICONS.edit   + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="resize">' + ICONS.resize + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="move">'   + ICONS.move   + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="close">'  + ICONS.close  + '<span class="r1"></span><span class="r2"></span></button>' +
-    '</div>' +
-    '<div class="body">' +
-      '<div class="face front" contenteditable="true" spellcheck="false"></div>' +
-      '<div class="face back" contenteditable="true" spellcheck="false"></div>' +
+    '<div class="bar">'+
+      '<button class="btn" data-act="flip">'   +ICONS.flip  +'<span class="r1"></span><span class="r2"></span></button>'+
+      '<button class="btn" data-act="edit">'   +ICONS.edit  +'<span class="r1"></span><span class="r2"></span></button>'+
+      '<button class="btn" data-act="resize">' +ICONS.resize+'<span class="r1"></span><span class="r2"></span></button>'+
+      '<button class="btn" data-act="move">'   +ICONS.move  +'<span class="r1"></span><span class="r2"></span></button>'+
+      '<button class="btn" data-act="close">'  +ICONS.close +'<span class="r1"></span><span class="r2"></span></button>'+
+    '</div>'+
+    '<div class="body">'+
+      '<div class="face front" contenteditable="true" spellcheck="false"></div>'+
+      '<div class="face back" contenteditable="true" spellcheck="false"></div>'+
     '</div>';
 
-  var frontEl = el.querySelector('.front');
-  var backEl  = el.querySelector('.back');
-  if (o.front) frontEl.innerHTML = o.front;
-  if (o.back)  backEl.innerHTML  = o.back;
+  const frontEl=el.querySelector('.front');
+  const backEl =el.querySelector('.back');
+  if(o.front) frontEl.innerHTML=o.front;
+  if(o.back)  backEl.innerHTML =o.back;
 
-  var obj = {
-    id: id, x: x, y: y,
-    w: o.w || 260, h: o.h || 170,
-    flip: !!o.flip, mode: null,
-    el: el, frontEl: frontEl, backEl: backEl,
-    _w: 0, _h: 0,
-    anchorX: 0, anchorY: 0,
-    offX: 0, offY: 0
+  const obj={
+    id:id, x:x, y:y,
+    w:o.w||260, h:o.h||170,
+    flip:!!o.flip, mode:null,
+    el:el, frontEl:frontEl, backEl:backEl,
+    _w:0, _h:0,
+    offX:0, offY:0, anchorX:0, anchorY:0
   };
 
-  el.addEventListener('click', function(e){
-    var b = e.target.closest ? e.target.closest('.btn') : null;
-    if (!b) return;
-    var a = b.dataset.act;
-    if (!MOBILE && (a === 'move' || a === 'resize')) return;
+  // buttons — PC drag for move/resize
+  el.addEventListener('pointerdown', e=>{
+    if(e.pointerType!=='mouse'||e.button!==0) return;
+    const b=e.target.closest?e.target.closest('.btn'):null;
+    if(!b) return;
+    const a=b.dataset.act;
+    if(a==='move'||a==='resize'){
+      e.preventDefault(); e.stopPropagation();
+      startDrag(obj,a,e);
+    }
+  });
+  el.addEventListener('click', e=>{
+    const b=e.target.closest?e.target.closest('.btn'):null;
+    if(!b) return;
+    const a=b.dataset.act;
+    if(!MOBILE && (a==='move'||a==='resize')) return; // PC drag handles these
     e.stopPropagation();
-    act(obj, a);
+    act(obj,a);
   });
 
-  el.addEventListener('mousedown', function(e){
-    if (MOBILE) return;
-    var b = e.target.closest ? e.target.closest('.btn') : null;
-    if (!b) return;
-    var a = b.dataset.act;
-    if (a !== 'move' && a !== 'resize') return;
-    e.preventDefault();
-    e.stopPropagation();
-    startDrag(obj, a, e);
-  });
-
-  frontEl.addEventListener('input', function(){ scheduleSave(obj); });
-  backEl.addEventListener('input',  function(){ scheduleSave(obj); });
+  frontEl.addEventListener('input',()=>scheduleSave(obj));
+  backEl.addEventListener('input', ()=>scheduleSave(obj));
 
   wins.push(obj);
   worldEl.appendChild(el);
   return obj;
 }
 
-function act(o, a){
-  if (a === 'close'){
-    if (o.mode) applyMode(o, null);
+function act(o,a){
+  if(a==='close'){
+    if(o.mode) applyMode(o,null);
     o.el.remove();
-    var i = wins.indexOf(o);
-    if (i >= 0) wins.splice(i, 1);
+    const i=wins.indexOf(o);
+    if(i>=0) wins.splice(i,1);
     removeRec(o.id);
-  } else if (a === 'flip'){
-    o.flip = !o.flip;
-    o.el.classList.toggle('flipped', o.flip);
+  } else if(a==='flip'){
+    o.flip=!o.flip;
+    o.el.classList.toggle('flipped',o.flip);
     scheduleSave(o);
-  } else if (a === 'move'){
-    applyMode(o, o.mode === 'move' ? null : 'move');
-  } else if (a === 'resize'){
-    applyMode(o, o.mode === 'resize' ? null : 'resize');
-  } else if (a === 'edit'){
-    (o.flip ? o.backEl : o.frontEl).focus();
+  } else if(a==='move'){
+    applyMode(o, o.mode==='move'?null:'move');
+  } else if(a==='resize'){
+    applyMode(o, o.mode==='resize'?null:'resize');
+  } else if(a==='edit'){
+    (o.flip?o.backEl:o.frontEl).focus();
   }
 }
 
-function applyMode(o, m){
-  if (o.mode === m) return;
-  if (modeWin && modeWin !== o) applyMode(modeWin, null);
-
-  o.mode = m;
-  o.el.classList.toggle('moving',   m === 'move');
-  o.el.classList.toggle('resizing', m === 'resize');
-
-  if (m){
-    modeWin = o;
-    if (m === 'move'){
-      o.offX = o.x - camX;
-      o.offY = o.y - camY;
-    } else if (m === 'resize'){
-      o.anchorX = camX - o.w;
-      o.anchorY = camY - o.h;
+function applyMode(o,m){
+  if(o.mode===m) return;
+  if(modeWin&&modeWin!==o) applyMode(modeWin,null);
+  o.mode=m;
+  o.el.classList.toggle('moving',  m==='move');
+  o.el.classList.toggle('resizing',m==='resize');
+  if(m){
+    modeWin=o;
+    if(m==='move'){
+      o.offX=o.x-camX; o.offY=o.y-camY;
+    } else {
+      o.anchorX=camX-o.w; o.anchorY=camY-o.h;
     }
-    stillStart = performance.now();
-    stillCamX  = camX;
-    stillCamY  = camY;
+    modeStillStart=performance.now();
+    modeStillCamX=camX; modeStillCamY=camY;
   } else {
-    if (modeWin === o) modeWin = null;
+    if(modeWin===o) modeWin=null;
     scheduleSave(o);
   }
-  setRing(0, false);
+  setRing(0,false);
 }
 
-/* ---------------- orientation: quaternion-based (gimbal-lock safe) ---------------- */
-var orientReady = false, orientTried = false;
-var qYaw = 0, qPitch = 0;
-var smoothYaw = 0, smoothPitch = 0;
-var hasInitialYaw = false;
-
-function eulerToQuaternion(alpha, beta, gamma){
-  /* DeviceOrientation uses intrinsic Z-X'-Y'' (ZXY) order */
-  var a = alpha * Math.PI / 360;   /* half angles */
-  var b = beta  * Math.PI / 360;
-  var g = gamma * Math.PI / 360;
-
-  var ca = Math.cos(a), sa = Math.sin(a);
-  var cb = Math.cos(b), sb = Math.sin(b);
-  var cg = Math.cos(g), sg = Math.sin(g);
-
-  return {
-    w: ca * cb * cg + sa * sb * sg,
-    x: ca * sb * cg - sa * cb * sg,
-    y: sa * cb * cg + ca * sb * sg,
-    z: sa * cb * sg - ca * sb * cg
-  };
+// ---- PC window move/resize drag
+function startDrag(o,kind,e){
+  if(drag) endDrag();
+  if(modeWin) applyMode(modeWin,null);
+  drag={o:o,kind:kind,sx:e.clientX,sy:e.clientY,x0:o.x,y0:o.y,w0:o.w,h0:o.h};
+  camVelX=0; camVelY=0;
+  o.el.classList.add(kind==='move'?'moving':'resizing');
 }
-
-function quaternionYawPitch(q){
-  /* Extract a stable yaw (heading) and pitch from quaternion */
-  var sinYaw   = 2 * (q.w * q.z + q.x * q.y);
-  var cosYaw   = 1 - 2 * (q.y * q.y + q.z * q.z);
-  var yaw      = Math.atan2(sinYaw, cosYaw) * 180 / Math.PI;
-
-  var sinPitch = 2 * (q.w * q.x - q.y * q.z);
-  sinPitch = Math.max(-1, Math.min(1, sinPitch));
-  var pitch    = Math.asin(sinPitch) * 180 / Math.PI;
-
-  return { yaw: yaw, pitch: pitch };
+function endDrag(){
+  if(!drag) return;
+  const o=drag.o;
+  drag=null;
+  o.el.classList.remove('moving','resizing');
+  saveNow(o);
 }
-
-function onOrient(e){
-  if (e.alpha == null || e.beta == null || e.gamma == null) return;
-  orientReady = true;
-
-  var q = eulerToQuaternion(e.alpha, e.beta, e.gamma);
-  var rp = quaternionYawPitch(q);
-
-  if (!hasInitialYaw){
-    smoothYaw = rp.yaw;
-    smoothPitch = rp.pitch;
-    hasInitialYaw = true;
-  }
-
-  qYaw   = rp.yaw;
-  qPitch = rp.pitch;
-}
-
-function enableOrientation(){
-  if (!MOBILE || orientTried) return;
-  orientTried = true;
-
-  function addListeners(){
-    window.addEventListener('deviceorientation', onOrient);
-  }
-
-  try {
-    if (typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function'){
-      DeviceOrientationEvent.requestPermission().then(function(r){
-        if (r === 'granted') addListeners();
-      }).catch(function(){});
-    } else if (typeof DeviceOrientationEvent !== 'undefined'){
-      addListeners();
-    }
-  } catch(err){}
-}
-
-/* ---------------- input: pan / tap / long-press menu ---------------- */
-var down = null;
-var suppressTap = false;
-var longPressTimer = null;
-var longPressFired = false;
-var menuOpen = false;
-var menuJustClosed = false;
-
-function openMenu(x, y){
-  menuOpen = true;
-  menuEl.classList.add('open');
-  var mw = 180, mh = 90;
-  var px = Math.min(x, innerWidth  - mw - 8);
-  var py = Math.min(y, innerHeight - mh - 8);
-  menuEl.style.left = Math.max(8, px) + 'px';
-  menuEl.style.top  = Math.max(8, py) + 'px';
-}
-
-function closeMenu(){
-  if (!menuOpen) return;
-  menuOpen = false;
-  menuJustClosed = true;
-  menuEl.classList.remove('open');
-  setTimeout(function(){ menuJustClosed = false; }, 0);
-}
-
-function cancelLongPress(){
-  if (longPressTimer){
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-  }
-}
-
-function startLongPress(x, y){
-  cancelLongPress();
-  longPressFired = false;
-  longPressTimer = setTimeout(function(){
-    longPressTimer = null;
-    longPressFired = true;
-    openMenu(x, y);
-  }, 500);
-}
-
-function endLongPress(){
-  cancelLongPress();
-}
-
-/* menu toggles */
-invXEl.addEventListener('change', function(){ invertX = invXEl.checked; });
-invYEl.addEventListener('change', function(){ invertY = invYEl.checked; });
-
-/* close menu on outside tap */
-document.addEventListener('pointerdown', function(e){
-  if (!menuOpen) return;
-  if (menuEl.contains(e.target)) return;
-  closeMenu();
-}, true);
-
-/* pointer down (covers mouse + touch) */
-document.addEventListener('pointerdown', function(e){
-  if (e.button !== undefined && e.button !== 0) return; /* only primary */
-  if (menuJustClosed) return;
-
-  var t = e.target;
-  if (t.closest && t.closest('#menu')) return;
-  if (t.closest && (t.closest('.btn') || t.closest('.face'))) return;
-
-  /* ignore taps on window chrome – those are handled by window logic */
-  if (t.closest && t.closest('.win') && !t.closest('.face')) {
-    /* allow long-press menu on window background too? keep simple: no */
-    return;
-  }
-
-  if (MOBILE) enableOrientation();
-
-  down = {
-    x: e.clientX, y: e.clientY,
-    lx: e.clientX, ly: e.clientY,
-    moved: false,
-    noCreate: false,
-    pointerId: e.pointerId
-  };
-
-  startLongPress(e.clientX, e.clientY);
-}, { passive: true });
-
-/* pointer move */
-document.addEventListener('pointermove', function(e){
-  if (!down) return;
-
-  var dx = e.clientX - down.x, dy = e.clientY - down.y;
-  if (!down.moved && (dx*dx + dy*dy) > 16){
-    down.moved = true;
-    endLongPress();          /* moving cancels long-press */
-  }
-
-  if (!down.moved) return;
-
-  /* workspace panning (PC & mobile fallback) */
-  if (!MOBILE || !orientReady){
-    camX -= (e.clientX - down.lx);
-    camY -= (e.clientY - down.ly);
-  }
-  down.lx = e.clientX;
-  down.ly = e.clientY;
-}, { passive: true });
-
-/* pointer up */
-document.addEventListener('pointerup', function(e){
-  if (!down) return;
-
-  var wasMoved = down.moved;
-  var wasLongPress = longPressFired;
-  down = null;
-  endLongPress();
-
-  if (menuOpen) return;
-  if (wasLongPress) return;
-  if (wasMoved) return;
-  if (menuJustClosed) return;
-
-  /* it was a tap → create window */
-  var wx, wy;
-  if (MOBILE){
-    wx = camX - 130;
-    wy = camY - 85;
+window.addEventListener('pointermove',e=>{
+  if(!drag) return;
+  if(e.pointerType==='mouse'&&e.buttons===0){endDrag(); return;}
+  const dx=e.clientX-drag.sx, dy=e.clientY-drag.sy;
+  if(drag.kind==='move'){
+    drag.o.x=drag.x0+dx;
+    drag.o.y=drag.y0+dy;
   } else {
-    wx = e.clientX - innerWidth  / 2 + camX - 130;
-    wy = e.clientY - innerHeight / 2 + camY - 85;
+    drag.o.w=Math.max(120,drag.w0+dx);
+    drag.o.h=Math.max(80, drag.h0+dy);
   }
-  createWindow(wx, wy);
-}, { passive: true });
-
-/* pointer cancel / leave cleanup */
-document.addEventListener('pointercancel', function(){
-  down = null;
-  endLongPress();
 });
+window.addEventListener('pointerup',()=>{ if(drag) endDrag(); });
+window.addEventListener('pointercancel',()=>{ if(drag) endDrag(); });
 
-/* prevent context menu on long-press (browser callout) */
-document.addEventListener('contextmenu', function(e){
-  if (MOBILE) e.preventDefault();
-});
+// ---- KRPano-style pan drag (mouse & touch)
+function startPanDrag(e){
+  if(e.target.closest&&e.target.closest('.win')) return;
+  panDrag={
+    id:e.pointerId,
+    lx:e.clientX, ly:e.clientY,
+    vx:0, vy:0,
+    lastT:performance.now(),
+    moved:false
+  };
+  camVelX=0; camVelY=0;
+}
+function movePanDrag(e){
+  if(!panDrag||e.pointerId!==panDrag.id) return;
+  if(e.pointerType==='mouse'&&e.buttons===0){ endPanDrag(e); return; }
+  e.preventDefault();
 
-/* ---------------- charge / dwell (mobile AOE) ---------------- */
-var chargeBtn = null, chargeStart = 0, firedBtn = null;
-var lastCCamX = 0, lastCCamY = 0;
+  const now=performance.now();
+  const dt=Math.max(1,(now-panDrag.lastT))/1000;
+  const dx=e.clientX-panDrag.lx;
+  const dy=e.clientY-panDrag.ly;
 
-function setCharge(btn, p, on){
-  if (!btn) return;
-  btn.classList.toggle('charge', !!on);
-  var r2 = btn.querySelector('.r2');
-  if (r2) r2.style.transform = 'translate(-50%,-50%) scale(' + (on ? Math.max(0.06, p) : 0) + ')';
+  // 1:1 pixel follow
+  camX -= dx * DRAG_SCALE;
+  camY -= dy * DRAG_SCALE;
+
+  // estimate velocity for inertia
+  panDrag.vx = dx / dt;
+  panDrag.vy = dy / dt;
+
+  if(Math.abs(dx)>2||Math.abs(dy)>2) panDrag.moved=true;
+
+  panDrag.lx=e.clientX; panDrag.ly=e.clientY;
+  panDrag.lastT=now;
+}
+function endPanDrag(e){
+  if(!panDrag||e.pointerId!==panDrag.id) return;
+  const p=panDrag;
+  panDrag=null;
+
+  // apply inertia only if it was a real drag
+  if(p.moved){
+    camVelX = -p.vx * 0.35;
+    camVelY = -p.vy * 0.35;
+  } else {
+    // it was a tap → create window
+    const isBottom = e.clientY > innerHeight*(1-BOTTOM_FRAC);
+    if(isBottom){
+      const now=performance.now();
+      if(now-lastBottomTap<BOTTOM_DBL_MS){
+        recalibrateTilt();
+        if(!sensorState.motionEnabled){ camX=0; camY=0; camVelX=0; camVelY=0; }
+        lastBottomTap=0;
+      } else {
+        lastBottomTap=now;
+      }
+    } else {
+      if(MOBILE){
+        createWindow(camX-130, camY-85);
+      } else {
+        createWindow(e.clientX - innerWidth/2  + camX - 130,
+                     e.clientY - innerHeight/2 + camY - 85);
+      }
+    }
+  }
 }
 
+worldEl.addEventListener('pointerdown',e=>{
+  if(e.target.closest&&e.target.closest('.win')) return;
+  startPanDrag(e);
+  if(MOBILE) requestMotion();
+});
+worldEl.addEventListener('pointermove',movePanDrag,{passive:false});
+worldEl.addEventListener('pointerup',endPanDrag);
+worldEl.addEventListener('pointercancel',endPanDrag);
+
+let lastBottomTap=0;
+
+// ---- AOE charge (mobile)
+let chargeBtn=null, chargeStart=0, firedBtn=null;
+let lastCCamX=0, lastCCamY=0;
+
+function setCharge(btn,p,on){
+  if(!btn) return;
+  btn.classList.toggle('charge',!!on);
+  const r2=btn.querySelector('.r2');
+  if(r2) r2.style.transform='translate(-50%,-50%) scale('+(on?Math.max(0.06,p):0)+')';
+}
+function setRing(p,on){
+  ringEl.style.opacity=on?'1':'0';
+  ringEl.style.strokeDashoffset=String(RING_LEN*(1-Math.min(1,p)));
+}
 function updateCharge(t){
-  var el  = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-  var btn = (el && el.closest) ? el.closest('.btn') : null;
-
-  if (Math.abs(camX - lastCCamX) > 0.6 || Math.abs(camY - lastCCamY) > 0.6){
-    lastCCamX = camX;
-    lastCCamY = camY;
-    if (chargeBtn) setCharge(chargeBtn, 0, false);
-    chargeBtn = btn;
-    chargeStart = t;
-    firedBtn = null;
-    if (chargeBtn) setCharge(chargeBtn, 0, true);
+  if(modeWin){
+    if(chargeBtn) setCharge(chargeBtn,0,false);
+    chargeBtn=null;
     return;
   }
+  const el=document.elementFromPoint(innerWidth/2,innerHeight/2);
+  const btn=(el&&el.closest)?el.closest('.btn'):null;
 
-  if (btn !== chargeBtn){
-    if (chargeBtn) setCharge(chargeBtn, 0, false);
-    chargeBtn = btn;
-    chargeStart = t;
-    firedBtn = null;
-    if (chargeBtn) setCharge(chargeBtn, 0, true);
+  if(Math.abs(camX-lastCCamX)>0.6||Math.abs(camY-lastCCamY)>0.6){
+    lastCCamX=camX; lastCCamY=camY;
+    if(chargeBtn) setCharge(chargeBtn,0,false);
+    chargeBtn=btn;
+    chargeStart=t;
+    firedBtn=null;
+    if(chargeBtn) setCharge(chargeBtn,0,true);
+    return;
   }
-
-  if (!chargeBtn || chargeBtn === firedBtn) return;
-
-  var p = (t - chargeStart) / 1000;
-  if (p >= 1){
-    firedBtn = chargeBtn;
-    setCharge(chargeBtn, 0, false);
+  if(btn!==chargeBtn){
+    if(chargeBtn) setCharge(chargeBtn,0,false);
+    chargeBtn=btn;
+    chargeStart=t;
+    firedBtn=null;
+    if(chargeBtn) setCharge(chargeBtn,0,true);
+  }
+  if(!chargeBtn||chargeBtn===firedBtn) return;
+  const p=(t-chargeStart)/STILL_MS;
+  if(p>=1){
+    firedBtn=chargeBtn;
+    setCharge(chargeBtn,0,false);
     chargeBtn.click();
   } else {
-    setCharge(chargeBtn, p, true);
+    setCharge(chargeBtn,p,true);
   }
 }
 
-/* ---------------- ring ---------------- */
-function setRing(p, on){
-  ringEl.style.opacity = on ? '1' : '0';
-  ringEl.style.strokeDashoffset = String(RING_LEN * (1 - Math.min(1, p)));
-}
-
-/* ---------------- frame ---------------- */
-var lastT = 0;
-
+// ---- frame
+let lastT=0;
 function frame(t){
-  if (!lastT) lastT = t;
-  lastT = t;
+  if(!lastT) lastT=t;
+  const dt=Math.min(0.05,(t-lastT)/1000);
+  lastT=t;
 
-  if (MOBILE && orientReady){
-    smoothYaw   += (qYaw   - smoothYaw)   * 0.08;
-    smoothPitch += (qPitch - smoothPitch) * 0.18;
-
-    var yaw = invertX ? -smoothYaw : smoothYaw;
-    var pit = invertY ? -smoothPitch : smoothPitch;
-
-    camX = -yaw * 9;
-    var cy = pit * 7;
-    camY = cy > 1500 ? 1500 : (cy < -1500 ? -1500 : cy);
+  // camera
+  if(!panDrag && !drag){
+    const tilt=currentTilt();
+    camVelX += tilt.tx * 8000 * dt;
+    camVelY += tilt.ty * 8000 * dt;
   }
 
-  if (modeWin){
-    var mo = modeWin;
+  // friction
+  const fr = panDrag ? DRAG_FRICTION : INERTIA_FRICTION;
+  camVelX *= fr;
+  camVelY *= fr;
+  camX += camVelX * dt;
+  camY += camVelY * dt;
 
-    if (mo.mode === 'move'){
-      mo.x = camX + mo.offX;
-      mo.y = camY + mo.offY;
-    } else if (mo.mode === 'resize'){
-      mo.x = mo.anchorX;
-      mo.y = mo.anchorY;
-      mo.w = Math.max(120, camX - mo.anchorX);
-      mo.h = Math.max(80,  camY - mo.anchorY);
-    }
-
-    if (Math.abs(camX - stillCamX) > 0.5 || Math.abs(camY - stillCamY) > 0.5){
-      stillCamX = camX;
-      stillCamY = camY;
-      stillStart = t;
-    }
-
-    var mp = (t - stillStart) / 1000;
-    if (mp >= 1){
-      applyMode(mo, null);
-    } else {
-      setRing(mp, true);
-    }
-
-    if (t - lastModeSave > 600){
-      lastModeSave = t;
-      saveNow(mo);
-    }
+  // crosshair
+  if(MOBILE){
+    crossEl.style.transform='translate('+(innerWidth/2-12)+'px,'+(innerHeight/2-12)+'px)';
   } else {
-    setRing(0, false);
+    crossEl.style.transform='translate('+(mouse.sx-12)+'px,'+(mouse.sy-12)+'px)';
   }
 
-  var hw = innerWidth / 2, hh = innerHeight / 2;
-
-  for (var i = 0; i < wins.length; i++){
-    var o = wins[i];
-    if (o._w !== o.w){ o.el.style.width  = o.w + 'px'; o._w = o.w; }
-    if (o._h !== o.h){ o.el.style.height = o.h + 'px'; o._h = o.h; }
-    o.el.style.transform = 'translate(' +
-      Math.round(o.x - camX + hw) + 'px,' +
-      Math.round(o.y - camY + hh) + 'px)';
+  // mode
+  if(modeWin){
+    if(modeWin.mode==='move'){
+      modeWin.x=camX+modeWin.offX;
+      modeWin.y=camY+modeWin.offY;
+    } else if(modeWin.mode==='resize'){
+      modeWin.x=modeWin.anchorX;
+      modeWin.y=modeWin.anchorY;
+      modeWin.w=Math.max(120,camX-modeWin.anchorX);
+      modeWin.h=Math.max(80, camY-modeWin.anchorY);
+    }
+    if(Math.abs(camX-modeStillCamX)>0.5||Math.abs(camY-modeStillCamY)>0.5){
+      modeStillCamX=camX; modeStillCamY=camY;
+      modeStillStart=t;
+    }
+    const p=(t-modeStillStart)/STILL_MS;
+    if(p>=1){ applyMode(modeWin,null); }
+    else { setRing(p,true); }
+  } else {
+    setRing(0,false);
   }
 
-  if (MOBILE) updateCharge(t);
+  // layout windows
+  const hw=innerWidth/2, hh=innerHeight/2;
+  for(let i=0;i<wins.length;i++){
+    const o=wins[i];
+    if(o._w!==o.w){o.el.style.width=o.w+'px'; o._w=o.w;}
+    if(o._h!==o.h){o.el.style.height=o.h+'px'; o._h=o.h;}
+    o.el.style.transform='translate('+Math.round(o.x-camX+hw)+'px,'+Math.round(o.y-camY+hh)+'px)';
+  }
+
+  if(MOBILE) updateCharge(t);
 
   requestAnimationFrame(frame);
 }
-
 requestAnimationFrame(frame);
 
 })();
