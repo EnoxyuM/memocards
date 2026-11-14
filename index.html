@@ -15,91 +15,56 @@
     user-select: none; -webkit-user-select: none;
     touch-action: none;
   }
-  #pano-canvas {
-    display: block;
-    width: 100%; height: 100%;
-    touch-action: none;
-  }
-
+  #pano-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   #start-screen {
     position: fixed; inset: 0; z-index: 20;
     display: flex; align-items: center; justify-content: center;
-    background: #0a0e14;
-    color: #5ad0ff;
+    background: #0a0e14; color: #5ad0ff;
     font: 600 30px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     letter-spacing: 0.08em;
     text-shadow: 0 0 20px rgba(90, 208, 255, 0.55);
-    cursor: pointer;
-    transition: opacity 0.45s ease;
+    cursor: pointer; transition: opacity 0.45s ease;
   }
   #start-screen.hidden { opacity: 0; pointer-events: none; }
-
   #crosshair {
-    position: fixed;
-    left: 50%; top: 50%;
-    width: 22px; height: 22px;
-    margin: -11px 0 0 -11px;
-    z-index: 10;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.4s ease;
+    position: fixed; left: 50%; top: 50%;
+    width: 22px; height: 22px; margin: -11px 0 0 -11px;
+    z-index: 10; pointer-events: none; opacity: 0; transition: opacity 0.4s ease;
   }
   #crosshair.visible { opacity: 1; }
   #crosshair::before, #crosshair::after {
-    content: '';
-    position: absolute;
-    background: #8fe4ff;
-    box-shadow: 0 0 6px rgba(90, 208, 255, 0.9);
-    border-radius: 1px;
+    content: ''; position: absolute; background: #8fe4ff;
+    box-shadow: 0 0 6px rgba(90, 208, 255, 0.9); border-radius: 1px;
   }
   #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
+  #crosshair::after  { top: 10px; left: 0; width: 2px; height: 22px; }
   #crosshair::after  { top: 10px; left: 0; width: 22px; height: 2px; }
-
   #joystick {
-    position: fixed;
-    left: 24px; bottom: 24px;
-    width: 130px; height: 130px;
-    border-radius: 50%;
+    position: fixed; left: 24px; bottom: 24px;
+    width: 130px; height: 130px; border-radius: 50%;
     background: rgba(90, 208, 255, 0.08);
     border: 2px solid rgba(90, 208, 255, 0.5);
-    z-index: 15;
-    touch-action: none;
-    display: none;
+    z-index: 15; touch-action: none; display: none;
   }
   #joystick.active { display: block; }
   #joystick-knob {
-    position: absolute;
-    left: 50%; top: 50%;
-    width: 54px; height: 54px;
-    margin: -27px 0 0 -27px;
-    border-radius: 50%;
+    position: absolute; left: 50%; top: 50%;
+    width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
     background: rgba(90, 208, 255, 0.3);
     border: 2px solid rgba(90, 208, 255, 0.9);
-    pointer-events: none;
-    will-change: transform;
+    pointer-events: none; will-change: transform;
   }
-
   .action-btn {
-    position: fixed;
-    width: 68px; height: 68px;
-    border-radius: 50%;
+    position: fixed; width: 68px; height: 68px; border-radius: 50%;
     background: rgba(90, 208, 255, 0.12);
     border: 2px solid rgba(90, 208, 255, 0.6);
-    z-index: 15;
-    display: none;
-    align-items: center; justify-content: center;
+    z-index: 15; display: none; align-items: center; justify-content: center;
     font: 600 11px/1.1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    color: #8fe4ff;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    text-align: center;
-    touch-action: none;
-    padding: 4px;
-    box-sizing: border-box;
+    color: #8fe4ff; text-transform: uppercase; letter-spacing: 0.05em;
+    text-align: center; touch-action: none; padding: 4px; box-sizing: border-box;
   }
   .action-btn.active { display: flex; }
   .action-btn:active { background: rgba(90, 208, 255, 0.35); }
-
   #btn-build   { right: 24px; bottom: 102px; }
   #btn-destroy { right: 102px; bottom: 102px; }
   #btn-jump    { right: 24px; bottom: 24px; width: 84px; height: 84px; font-size: 13px; }
@@ -118,38 +83,28 @@
 <script>
 (function () {
   'use strict';
-
-  if (typeof THREE === 'undefined') {
-    console.error('[pano] Three.js не загрузился');
-    return;
-  }
+  if (typeof THREE === 'undefined') { console.error('[pano] Three.js не загрузился'); return; }
 
   const DEG = Math.PI / 180;
 
-  /* ============================================================
-     Renderer / Scene / Camera / Lights
-     ============================================================ */
   const canvas = document.getElementById('pano-canvas');
   const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(0x0a0e14, 1);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 2000);
+  const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2000);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.75));
   const sun1 = new THREE.DirectionalLight(0xffffff, 0.55);
-  sun1.position.set(30, 80, 20);
-  scene.add(sun1);
+  sun1.position.set(30, 80, 20); scene.add(sun1);
   const sun2 = new THREE.DirectionalLight(0xffffff, 0.25);
-  sun2.position.set(-40, 40, -30);
-  scene.add(sun2);
+  sun2.position.set(-40, 40, -30); scene.add(sun2);
 
-  /* ============================================================
-     World generation
-     ============================================================ */
+  /* ============ World ============ */
   const CHUNK_SIZE = 16;
   const VIEW_DIST = 3;
+  const MAX_WIN_DIST = 60;
   const worldSeed = Math.floor(Math.random() * 1000000);
   const chunks = new Map();
 
@@ -160,9 +115,7 @@
     h = Math.imul(h ^ (h >>> 13), 0x27d4eb2d);
     return (h >>> 0) / 4294967296;
   }
-
   function smooth(t) { return t * t * (3 - 2 * t); }
-
   function valueNoise(x, z, seed) {
     const xi = Math.floor(x), zi = Math.floor(z);
     const xf = x - xi, zf = z - zi;
@@ -173,7 +126,6 @@
     const d = hash2(xi + 1, zi + 1, seed);
     return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
   }
-
   function terrainHeight(wx, wz) {
     const n1 = valueNoise(wx * 0.05, wz * 0.05, worldSeed);
     const n2 = valueNoise(wx * 0.2, wz * 0.2, worldSeed + 1);
@@ -190,8 +142,7 @@
 
   function generateChunk(cx, cz) {
     const chunk = { cx, cz, blocks: new Map(), mesh: null };
-    const x0 = cx * CHUNK_SIZE;
-    const z0 = cz * CHUNK_SIZE;
+    const x0 = cx * CHUNK_SIZE, z0 = cz * CHUNK_SIZE;
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const wx = x0 + lx, wz = z0 + lz;
@@ -209,21 +160,15 @@
   }
 
   function buildChunkMesh(chunk) {
-    if (chunk.mesh) {
-      scene.remove(chunk.mesh);
-      chunk.mesh = null;
-    }
+    if (chunk.mesh) { scene.remove(chunk.mesh); chunk.mesh = null; }
     if (chunk.blocks.size === 0) return;
-
     const groups = {};
     chunk.blocks.forEach((type, bkey) => {
       if (!groups[type]) groups[type] = [];
       groups[type].push(bkey);
     });
-
     const group = new THREE.Group();
     const dummy = new THREE.Object3D();
-
     for (const typeStr in groups) {
       const type = +typeStr;
       const list = groups[type];
@@ -239,7 +184,6 @@
       mesh.instanceMatrix.needsUpdate = true;
       group.add(mesh);
     }
-
     scene.add(group);
     chunk.mesh = group;
   }
@@ -247,14 +191,9 @@
   function getChunk(cx, cz) {
     const key = cx + ',' + cz;
     let chunk = chunks.get(key);
-    if (!chunk) {
-      chunk = generateChunk(cx, cz);
-      chunks.set(key, chunk);
-      buildChunkMesh(chunk);
-    }
+    if (!chunk) { chunk = generateChunk(cx, cz); chunks.set(key, chunk); buildChunkMesh(chunk); }
     return chunk;
   }
-
   function getBlock(wx, wy, wz) {
     const cx = Math.floor(wx / CHUNK_SIZE);
     const cz = Math.floor(wz / CHUNK_SIZE);
@@ -262,262 +201,205 @@
     if (!chunk) return 0;
     return chunk.blocks.get(wx + ',' + wy + ',' + wz) || 0;
   }
-
   function setBlock(wx, wy, wz, type) {
     const cx = Math.floor(wx / CHUNK_SIZE);
     const cz = Math.floor(wz / CHUNK_SIZE);
     const key = cx + ',' + cz;
     let chunk = chunks.get(key);
-    if (!chunk) {
-      chunk = { cx, cz, blocks: new Map(), mesh: null };
-      chunks.set(key, chunk);
-    }
+    if (!chunk) { chunk = { cx, cz, blocks: new Map(), mesh: null }; chunks.set(key, chunk); }
     const bkey = wx + ',' + wy + ',' + wz;
-    if (type === 0) {
-      if (!chunk.blocks.has(bkey)) return;
-      chunk.blocks.delete(bkey);
-    } else {
-      if (chunk.blocks.get(bkey) === type) return;
-      chunk.blocks.set(bkey, type);
-    }
+    if (type === 0) { if (!chunk.blocks.has(bkey)) return; chunk.blocks.delete(bkey); }
+    else { if (chunk.blocks.get(bkey) === type) return; chunk.blocks.set(bkey, type); }
     buildChunkMesh(chunk);
   }
 
-  /* ============================================================
-     Player
-     ============================================================ */
+  /* ============ Player ============ */
   const PLAYER_WIDTH = 0.6;
   const PLAYER_HEIGHT = 1.7;
   const EYE_HEIGHT = PLAYER_HEIGHT * 0.9;
   const GRAVITY = 25;
   const JUMP_VEL = 8.5;
   const MAX_SPEED = 5;
+  const REACH = 6;
 
   const playerPos = new THREE.Vector3(0.5, 0, 0.5);
   const playerVel = new THREE.Vector3(0, 0, 0);
   let grounded = false;
-
-  (function initPlayerPos() {
-    const h = terrainHeight(0, 0);
-    playerPos.set(0.5, h + 1, 0.5);
-  })();
+  (function () { const h = terrainHeight(0, 0); playerPos.set(0.5, h + 1, 0.5); })();
 
   const _camDir = new THREE.Vector3();
-  function getCamDir() {
-    camera.getWorldDirection(_camDir);
-    return _camDir;
-  }
+  function getCamDir() { camera.getWorldDirection(_camDir); return _camDir; }
 
   function playerAABBSolid(x, y, z) {
     const hw = PLAYER_WIDTH / 2;
     const minX = Math.floor(x - hw), maxX = Math.floor(x + hw);
     const minY = Math.floor(y), maxY = Math.floor(y + PLAYER_HEIGHT);
     const minZ = Math.floor(z - hw), maxZ = Math.floor(z + hw);
-    for (let bx = minX; bx <= maxX; bx++) {
-      for (let by = minY; by <= maxY; by++) {
-        for (let bz = minZ; bz <= maxZ; bz++) {
-          if (getBlock(bx, by, bz) !== 0) {
+    for (let bx = minX; bx <= maxX; bx++)
+      for (let by = minY; by <= maxY; by++)
+        for (let bz = minZ; bz <= maxZ; bz++)
+          if (getBlock(bx, by, bz) !== 0)
             if (x + hw > bx && x - hw < bx + 1 &&
                 y + PLAYER_HEIGHT > by && y < by + 1 &&
-                z + hw > bz && z - hw < bz + 1) {
-              return true;
-            }
-          }
-        }
-      }
-    }
+                z + hw > bz && z - hw < bz + 1) return true;
     return false;
   }
-
   function checkGrounded() {
     const hw = PLAYER_WIDTH / 2 - 0.01;
-    const minBX = Math.floor(playerPos.x - hw);
-    const maxBX = Math.floor(playerPos.x + hw);
-    const minBZ = Math.floor(playerPos.z - hw);
-    const maxBZ = Math.floor(playerPos.z + hw);
+    const minBX = Math.floor(playerPos.x - hw), maxBX = Math.floor(playerPos.x + hw);
+    const minBZ = Math.floor(playerPos.z - hw), maxBZ = Math.floor(playerPos.z + hw);
     const testY = Math.floor(playerPos.y - 0.05);
-    for (let bx = minBX; bx <= maxBX; bx++) {
-      for (let bz = minBZ; bz <= maxBZ; bz++) {
+    for (let bx = minBX; bx <= maxBX; bx++)
+      for (let bz = minBZ; bz <= maxBZ; bz++)
         if (getBlock(bx, testY, bz) !== 0) return true;
-      }
-    }
     return false;
   }
-
   function shouldAutoJump(dirX, dirZ) {
     if (!grounded) return false;
     const len = Math.hypot(dirX, dirZ);
     if (len < 0.01) return false;
     const nx = dirX / len, nz = dirZ / len;
-    const checkDist = 0.7;
-    const cx = playerPos.x + nx * checkDist;
-    const cz = playerPos.z + nz * checkDist;
+    const cx = playerPos.x + nx * 0.7, cz = playerPos.z + nz * 0.7;
     const footBlock = getBlock(Math.floor(cx), Math.floor(playerPos.y + 0.1), Math.floor(cz));
     if (footBlock === 0) return false;
     const headBlock = getBlock(Math.floor(cx), Math.floor(playerPos.y + PLAYER_HEIGHT - 0.1), Math.floor(cz));
     if (headBlock !== 0) return false;
-    const aboveFoot = getBlock(Math.floor(playerPos.x), Math.floor(playerPos.y + 1.2), Math.floor(playerPos.z));
-    if (aboveFoot !== 0) return false;
+    if (getBlock(Math.floor(playerPos.x), Math.floor(playerPos.y + 1.2), Math.floor(playerPos.z)) !== 0) return false;
     return true;
   }
 
   function updatePlayer(dt) {
     if (playerPos.y < -50) {
       const h = terrainHeight(0, 0);
-      playerPos.set(0.5, h + 2, 0.5);
-      playerVel.set(0, 0, 0);
+      playerPos.set(0.5, h + 2, 0.5); playerVel.set(0, 0, 0);
     }
-
     const camDir = getCamDir();
     let yawX = camDir.x, yawZ = camDir.z;
     const yawLen = Math.hypot(yawX, yawZ);
     if (yawLen > 0.0001) { yawX /= yawLen; yawZ /= yawLen; }
     const rightX = -yawZ, rightZ = yawX;
-
     const wishX = (yawX * joystickVec.z + rightX * joystickVec.x) * MAX_SPEED;
     const wishZ = (yawZ * joystickVec.z + rightZ * joystickVec.x) * MAX_SPEED;
-
-    if (shouldAutoJump(wishX, wishZ)) {
-      playerVel.y = JUMP_VEL;
-      grounded = false;
-    }
-
-    playerVel.x = wishX;
-    playerVel.z = wishZ;
+    if (shouldAutoJump(wishX, wishZ)) { playerVel.y = JUMP_VEL; grounded = false; }
+    playerVel.x = wishX; playerVel.z = wishZ;
     playerVel.y -= GRAVITY * dt;
     if (playerVel.y < -15) playerVel.y = -15;
-
     const dx = playerVel.x * dt;
-    if (dx !== 0 && !playerAABBSolid(playerPos.x + dx, playerPos.y, playerPos.z)) {
-      playerPos.x += dx;
-    }
+    if (dx !== 0 && !playerAABBSolid(playerPos.x + dx, playerPos.y, playerPos.z)) playerPos.x += dx;
     const dz = playerVel.z * dt;
-    if (dz !== 0 && !playerAABBSolid(playerPos.x, playerPos.y, playerPos.z + dz)) {
-      playerPos.z += dz;
-    }
-
+    if (dz !== 0 && !playerAABBSolid(playerPos.x, playerPos.y, playerPos.z + dz)) playerPos.z += dz;
     const dy = playerVel.y * dt;
     if (dy < 0) {
-      if (checkGrounded()) {
-        playerVel.y = 0;
-        grounded = true;
-      } else {
+      if (checkGrounded()) { playerVel.y = 0; grounded = true; }
+      else {
         const ny = playerPos.y + dy;
         if (playerAABBSolid(playerPos.x, ny, playerPos.z)) {
-          playerPos.y = Math.floor(ny) + 1;
-          playerVel.y = 0;
-          grounded = true;
-        } else {
-          playerPos.y = ny;
-          grounded = false;
-        }
+          playerPos.y = Math.floor(ny) + 1; playerVel.y = 0; grounded = true;
+        } else { playerPos.y = ny; grounded = false; }
       }
     } else if (dy > 0) {
       const ny = playerPos.y + dy;
-      if (playerAABBSolid(playerPos.x, ny, playerPos.z)) {
-        playerVel.y = 0;
-      } else {
-        playerPos.y = ny;
-      }
+      if (playerAABBSolid(playerPos.x, ny, playerPos.z)) playerVel.y = 0;
+      else playerPos.y = ny;
       grounded = false;
     } else {
       if (checkGrounded()) grounded = true;
     }
-
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
   }
 
-  /* ============================================================
-     Chunks (load only, no unload)
-     ============================================================ */
+  /* ============ Chunks ============ */
   let lastChunkCX = null, lastChunkCZ = null;
-
   function initialChunks() {
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
-    for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++) {
-      for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) {
-        getChunk(pcx + dx, pcz + dz);
-      }
-    }
-    lastChunkCX = pcx;
-    lastChunkCZ = pcz;
+    for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++)
+      for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) getChunk(pcx + dx, pcz + dz);
+    lastChunkCX = pcx; lastChunkCZ = pcz;
   }
-
   function updateChunks() {
     const pcx = Math.floor(playerPos.x / CHUNK_SIZE);
     const pcz = Math.floor(playerPos.z / CHUNK_SIZE);
     if (pcx === lastChunkCX && pcz === lastChunkCZ) return;
-    lastChunkCX = pcx;
-    lastChunkCZ = pcz;
-    for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++) {
+    lastChunkCX = pcx; lastChunkCZ = pcz;
+    for (let dx = -VIEW_DIST; dx <= VIEW_DIST; dx++)
       for (let dz = -VIEW_DIST; dz <= VIEW_DIST; dz++) {
         const cx = pcx + dx, cz = pcz + dz;
         if (!chunks.has(cx + ',' + cz)) getChunk(cx, cz);
       }
-    }
   }
 
-  /* ============================================================
-     Voxel raycast for build/destroy
-     ============================================================ */
+  /* ============ Block raycast / build / destroy ============ */
   function raycastBlock(maxDist) {
     const dir = getCamDir().clone();
     const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     const step = 0.05;
     let prev = { x: Math.floor(eye.x), y: Math.floor(eye.y), z: Math.floor(eye.z) };
     for (let t = 0; t <= maxDist; t += step) {
-      const px = eye.x + dir.x * t;
-      const py = eye.y + dir.y * t;
-      const pz = eye.z + dir.z * t;
+      const px = eye.x + dir.x * t, py = eye.y + dir.y * t, pz = eye.z + dir.z * t;
       const bx = Math.floor(px), by = Math.floor(py), bz = Math.floor(pz);
-      if (getBlock(bx, by, bz) !== 0) {
-        return { hit: { x: bx, y: by, z: bz }, prev: prev };
-      }
+      if (getBlock(bx, by, bz) !== 0) return { hit: { x: bx, y: by, z: bz }, prev };
       prev = { x: bx, y: by, z: bz };
     }
     return null;
   }
-
   function blockIntersectsPlayer(bx, by, bz) {
     const hw = PLAYER_WIDTH / 2;
-    return (
-      playerPos.x + hw > bx && playerPos.x - hw < bx + 1 &&
-      playerPos.y + PLAYER_HEIGHT > by && playerPos.y < by + 1 &&
-      playerPos.z + hw > bz && playerPos.z - hw < bz + 1
-    );
+    return (playerPos.x + hw > bx && playerPos.x - hw < bx + 1 &&
+            playerPos.y + PLAYER_HEIGHT > by && playerPos.y < by + 1 &&
+            playerPos.z + hw > bz && playerPos.z - hw < bz + 1);
   }
-
   function buildBlock() {
-    const res = raycastBlock(6);
-    if (!res) return;
+    const res = raycastBlock(REACH); if (!res) return;
     const { x, y, z } = res.prev;
     if (blockIntersectsPlayer(x, y, z)) return;
     setBlock(x, y, z, 4);
   }
-
   function destroyBlock() {
-    const res = raycastBlock(6);
-    if (!res) return;
+    const res = raycastBlock(REACH); if (!res) return;
     setBlock(res.hit.x, res.hit.y, res.hit.z, 0);
   }
+  function doJump() { if (grounded) { playerVel.y = JUMP_VEL; grounded = false; } }
 
-  function doJump() {
-    if (grounded) {
-      playerVel.y = JUMP_VEL;
-      grounded = false;
+  /* ============ Aim placement ============ */
+  function getAimPlacement() {
+    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const dir = getCamDir().clone();
+    const res = raycastBlock(REACH);
+    if (res) {
+      const hit = res.hit, prev = res.prev;
+      let nx = prev.x - hit.x, ny = prev.y - hit.y, nz = prev.z - hit.z;
+      if (Math.abs(nx) + Math.abs(ny) + Math.abs(nz) >= 0.5) {
+        const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+        if (ax >= ay && ax >= az) { nx = nx > 0 ? 1 : -1; ny = 0; nz = 0; }
+        else if (ay >= ax && ay >= az) { nx = 0; ny = ny > 0 ? 1 : -1; nz = 0; }
+        else { nx = 0; ny = 0; nz = nz > 0 ? 1 : -1; }
+        return {
+          pos: new THREE.Vector3(
+            hit.x + 0.5 + nx * 0.51,
+            hit.y + 0.5 + ny * 0.51,
+            hit.z + 0.5 + nz * 0.51
+          ),
+          normal: new THREE.Vector3(nx, ny, nz),
+          attached: true
+        };
+      }
     }
+    const pos = eye.clone().add(dir.clone().multiplyScalar(REACH));
+    const normal = dir.clone().negate().normalize();
+    return { pos, normal, attached: false };
   }
 
-  /* ============================================================
-     Windows
-     ============================================================ */
-  const DIST = 60;
+  /* ============ Windows ============ */
+  const WIN_W = 1.0;
+  const WIN_H = 0.75;
   const TEX_W = 512, TEX_H = 384;
-  const WIN_W = 24, WIN_H = 18;
   const WINDOW_FONT = '500 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
   const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
-  const BTN_SIZE = 44, BTN_TOP = 12, BTN_RIGHT = 12, BTN_GAP = 4;
+  const BTN_SIZE = 64, BTN_TOP = 8, BTN_RIGHT = 8, BTN_GAP = 3;
+
+  // Все кнопочные меши (hit / prog / ring) на одном z — 1% ширины окна вперёд.
+  const BTN_Z = 0.01;
 
   function buttonRect(index) {
     const right = TEX_W - BTN_RIGHT - index * (BTN_SIZE + BTN_GAP);
@@ -548,9 +430,8 @@
       let line = '';
       for (let j = 0; j < words.length; j++) {
         const test = line ? line + ' ' + words[j] : words[j];
-        if (ctx.measureText(test).width > maxWidth && line) {
-          lines.push(line); line = words[j];
-        } else { line = test; }
+        if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = words[j]; }
+        else line = test;
       }
       lines.push(line);
     }
@@ -562,7 +443,7 @@
     ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2);
     ctx.fillStyle = p.accentSoft; ctx.fill();
     ctx.strokeStyle = p.accentLight; ctx.fillStyle = p.accentLight;
-    ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const isz = rad * 0.52;
     if (id === 'close') {
       ctx.beginPath();
@@ -596,21 +477,18 @@
   function drawWindowFace(ctx, W, H, text, flipped) {
     const p = palette(flipped);
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#0d0d11';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0d0d11'; ctx.fillRect(0, 0, W, H);
     const g = ctx.createRadialGradient(W / 2, H / 2, 20, W / 2, H / 2, Math.max(W, H) * 0.7);
-    g.addColorStop(0, p.glow);
-    g.addColorStop(1, 'rgba(5, 5, 8, 0.0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    g.addColorStop(0, p.glow); g.addColorStop(1, 'rgba(5, 5, 8, 0.0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = p.border; ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, W - 2, H - 2);
     if (text) {
       ctx.font = WINDOW_FONT; ctx.fillStyle = p.text;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      const lines = wrapText(ctx, text, W - 90).slice(0, 5);
+      const lines = wrapText(ctx, text, W - 100).slice(0, 4);
       const lh = 38;
-      const startY = H / 2 + 8 - (lines.length - 1) * lh / 2;
+      const startY = H / 2 + 14 - (lines.length - 1) * lh / 2;
       for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], W / 2, startY + i * lh);
     }
     for (let i = 0; i < BTN_IDS.length; i++) drawButtonIcon(ctx, buttonRect(i), BTN_IDS[i], flipped, p);
@@ -621,8 +499,7 @@
 
   function makeWindow(text) {
     const group = new THREE.Group();
-    const ro = nextRenderOrder;
-    nextRenderOrder += 10;
+    const ro = nextRenderOrder; nextRenderOrder += 10;
 
     const cv = document.createElement('canvas');
     cv.width = TEX_W; cv.height = TEX_H;
@@ -630,20 +507,20 @@
     const tex = new THREE.CanvasTexture(cv);
     tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
 
+    // Лицо окна. polygonOffset отодвигает его чуть вглубь по z-buffer,
+    // чтобы кнопочные меши впереди гарантированно проходили depth test.
     const face = new THREE.Mesh(
       new THREE.PlaneGeometry(WIN_W, WIN_H),
       new THREE.MeshBasicMaterial({
         map: tex, transparent: true, side: THREE.DoubleSide,
-        depthTest: false, depthWrite: false
+        depthTest: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
       })
     );
     face.renderOrder = ro;
     group.add(face);
 
-    const win = {
-      group, face, ctx, tex,
-      textFront: text || '', textBack: '', flipped: false, buttons: {}
-    };
+    const win = { group, face, ctx, tex, textFront: text || '', textBack: '', flipped: false, buttons: {} };
 
     for (let i = 0; i < BTN_IDS.length; i++) {
       const id = BTN_IDS[i];
@@ -652,38 +529,39 @@
       const ly = (0.5 - (r.y + r.h / 2) / TEX_H) * WIN_H;
       const rad = (r.w / 2 / TEX_W) * WIN_W;
 
+      // Hit-меш на том же z, что и визуальные кольца — активация совпадает с картинкой.
       const hit = new THREE.Mesh(
-        new THREE.CircleGeometry(rad * 1.45, 16),
-        new THREE.MeshBasicMaterial({ visible: false, depthTest: false })
+        new THREE.CircleGeometry(rad * 1.10, 24),
+        new THREE.MeshBasicMaterial({ visible: false })
       );
-      hit.position.set(lx, ly, 0.05);
-      hit.renderOrder = ro + 1;
+      hit.position.set(lx, ly, BTN_Z);
       group.add(hit);
 
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(rad * 1.10, rad * 1.38, 28),
-        new THREE.MeshBasicMaterial({
-          color: 0x5ad0ff, transparent: true, opacity: 0.95,
-          side: THREE.DoubleSide, depthTest: false, depthWrite: false
-        })
-      );
-      ring.position.set(lx, ly, 0.12);
-      ring.renderOrder = ro + 6;
-      ring.visible = false;
-      group.add(ring);
-
+      // Заливка прогресса и кольцо — в ОДНОЙ плоскости (BTN_Z), чуть впереди окна.
       const prog = new THREE.Mesh(
-        new THREE.CircleGeometry(rad * 1.10, 28),
+        new THREE.CircleGeometry(rad * 1.05, 24),
         new THREE.MeshBasicMaterial({
           color: 0x5ad0ff, transparent: true, opacity: 0.35,
-          side: THREE.DoubleSide, depthTest: false, depthWrite: false
+          side: THREE.DoubleSide, depthTest: true, depthWrite: false
         })
       );
-      prog.position.set(lx, ly, 0.10);
+      prog.position.set(lx, ly, BTN_Z);
       prog.renderOrder = ro + 5;
       prog.visible = false;
       prog.scale.setScalar(0.0001);
       group.add(prog);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(rad * 1.05, rad * 1.30, 24),
+        new THREE.MeshBasicMaterial({
+          color: 0x5ad0ff, transparent: true, opacity: 0.95,
+          side: THREE.DoubleSide, depthTest: true, depthWrite: false
+        })
+      );
+      ring.position.set(lx, ly, BTN_Z);
+      ring.renderOrder = ro + 6;
+      ring.visible = false;
+      group.add(ring);
 
       win.buttons[id] = { id, hit, ring, prog, progress: 0, armed: true };
     }
@@ -703,16 +581,25 @@
     }
   }
 
-  function placeWindowAt(win, dir) {
-    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
-    win.group.position.copy(eye).add(dir.clone().multiplyScalar(DIST));
-    win.group.lookAt(eye);
+  function orientWindowToPlacement(win, placement) {
+    win.group.position.copy(placement.pos);
+    if (placement.attached) {
+      const n = placement.normal;
+      win.group.lookAt(
+        placement.pos.x + n.x,
+        placement.pos.y + n.y,
+        placement.pos.z + n.z
+      );
+    } else {
+      const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+      win.group.lookAt(eye);
+    }
   }
 
   function createWindowCenter() {
-    const dir = getCamDir().clone();
+    const placement = getAimPlacement();
     const win = makeWindow('');
-    placeWindowAt(win, dir);
+    orientWindowToPlacement(win, placement);
     scene.add(win.group);
     windows.push(win);
   }
@@ -735,9 +622,15 @@
     if (editingWin === win) cancelEdit();
   }
 
-  /* ============================================================
-     Hover / actions
-     ============================================================ */
+  function updateWindowVisibility() {
+    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    for (let i = 0; i < windows.length; i++) {
+      const w = windows[i];
+      w.group.visible = w.group.position.distanceTo(eye) <= MAX_WIN_DIST;
+    }
+  }
+
+  /* ============ Hover ============ */
   const raycaster = new THREE.Raycaster();
   const CENTER_NDC = new THREE.Vector2(0, 0);
 
@@ -746,17 +639,18 @@
     const hitsList = [];
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
+      if (!w.group.visible) continue;
       for (const id in w.buttons) hitsList.push(w.buttons[id].hit);
     }
+    if (!hitsList.length) return null;
     raycaster.setFromCamera(CENTER_NDC, camera);
     const hits = raycaster.intersectObjects(hitsList, false);
     if (!hits.length) return null;
     const obj = hits[0].object;
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
-      for (const id in w.buttons) {
+      for (const id in w.buttons)
         if (w.buttons[id].hit === obj) return { win: w, btn: w.buttons[id], id: id };
-      }
     }
     return null;
   }
@@ -776,6 +670,7 @@
   function updateHover(dt) {
     if (mode || editingWin) { clearAllButtonVisuals(); return; }
     const found = getButtonUnderCrosshair();
+
     for (let i = 0; i < windows.length; i++) {
       const w = windows[i];
       for (const id in w.buttons) {
@@ -788,22 +683,18 @@
         }
       }
     }
+
     if (!found) return;
     const b = found.btn;
     b.ring.visible = true;
     if (b.armed) {
       b.progress += dt;
-      if (b.progress >= 1) {
-        b.progress = 0; b.armed = false;
-        fireButton(found.win, b.id);
-      }
+      if (b.progress >= 1) { b.progress = 0; b.armed = false; fireButton(found.win, b.id); }
     }
     if (b.progress > 0.001) {
       b.prog.visible = true;
       b.prog.scale.setScalar(Math.max(0.0001, b.progress));
-    } else {
-      b.prog.visible = false;
-    }
+    } else b.prog.visible = false;
   }
 
   function fireButton(win, id) {
@@ -814,34 +705,24 @@
     else if (id === 'flip') { win.flipped = !win.flipped; refreshWindow(win); }
   }
 
-  /* ============================================================
-     Move / resize
-     ============================================================ */
+  /* ============ Move / Resize ============ */
   let mode = null;
   const MODE_TOL = 1.2 * DEG;
   const MODE_DURATION = 1.0;
 
   const modeRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.93, 1.0, 64),
-    new THREE.MeshBasicMaterial({
-      color: 0x5ad0ff, transparent: true, opacity: 0.95,
-      side: THREE.DoubleSide, depthTest: false, depthWrite: false
-    })
+    new THREE.RingGeometry(0.93, 1.0, 48),
+    new THREE.MeshBasicMaterial({ color: 0x5ad0ff, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthTest: false, depthWrite: false })
   );
   modeRing.renderOrder = 40; modeRing.visible = false; scene.add(modeRing);
 
   const modeFill = new THREE.Mesh(
-    new THREE.CircleGeometry(1, 64),
-    new THREE.MeshBasicMaterial({
-      color: 0x5ad0ff, transparent: true, opacity: 0.22,
-      side: THREE.DoubleSide, depthTest: false, depthWrite: false
-    })
+    new THREE.CircleGeometry(1, 48),
+    new THREE.MeshBasicMaterial({ color: 0x5ad0ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthTest: false, depthWrite: false })
   );
   modeFill.renderOrder = 39; modeFill.visible = false; scene.add(modeFill);
 
-  function hideModeVisuals() {
-    modeRing.visible = false; modeFill.visible = false;
-  }
+  function hideModeVisuals() { modeRing.visible = false; modeFill.visible = false; }
 
   function startMode(type, win) {
     const dir = getCamDir().clone();
@@ -854,27 +735,27 @@
       progress: 0, scaleT: 0,
       baseScale: win.group.scale.x || 1
     };
-    if (type === 'move') placeWindowAt(win, dir);
     const col = palette(win.flipped).hex;
     modeRing.material.color.setHex(col);
     modeFill.material.color.setHex(col);
     updateModeVisuals();
   }
 
-  function updateModeVisuals() {
+  function updateModeVisuals(placement) {
     if (!mode) { hideModeVisuals(); return; }
-    const plantAim = mode.plantOrigin.clone().add(mode.plantDir.clone().multiplyScalar(DIST));
-    const R = DIST * Math.tan(MODE_TOL);
-    const curEye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    if (!placement) placement = getAimPlacement();
+    const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const distToAim = placement.pos.distanceTo(eye);
+    const R = Math.max(0.03, distToAim * Math.tan(MODE_TOL));
 
-    modeRing.position.copy(plantAim);
-    modeRing.lookAt(curEye);
+    modeRing.position.copy(placement.pos);
+    modeRing.lookAt(eye);
     modeRing.scale.setScalar(R);
     modeRing.visible = true;
 
     const pr = Math.max(0, Math.min(1, mode.progress / MODE_DURATION));
-    modeFill.position.copy(plantAim);
-    modeFill.lookAt(curEye);
+    modeFill.position.copy(placement.pos);
+    modeFill.lookAt(eye);
     modeFill.scale.setScalar(Math.max(0.0001, R * pr));
     modeFill.visible = pr > 0.001;
   }
@@ -882,17 +763,16 @@
   function updateMode(dt) {
     if (!mode) return;
 
-    const dir = getCamDir().clone();
     const eye = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    const dir = getCamDir().clone();
+    const placement = getAimPlacement();
 
-    const plantAim = mode.plantOrigin.clone().add(mode.plantDir.clone().multiplyScalar(DIST));
-    const curAim = eye.clone().add(dir.clone().multiplyScalar(DIST));
-    const R = DIST * Math.tan(MODE_TOL);
-    const distToCircle = plantAim.distanceTo(curAim);
-    const inCircle = distToCircle < R;
-    const walked = mode.plantOrigin.distanceTo(eye) > 0.3;
+    const aimAng = Math.acos(Math.max(-1, Math.min(1, mode.plantDir.dot(dir))));
+    const eyeMoved = mode.plantOrigin.distanceTo(eye);
+    const isRunning = Math.hypot(playerVel.x, playerVel.z) > 0.1;
+    const stable = aimAng <= MODE_TOL && eyeMoved <= 0.3 && !isRunning;
 
-    if (!inCircle || walked) {
+    if (!stable) {
       mode.plantOrigin.copy(eye);
       mode.plantDir.copy(dir);
       mode.progress = 0;
@@ -900,28 +780,25 @@
       mode.progress += dt;
     }
 
-    placeWindowAt(mode.win, dir);
-
-    if (mode.type === 'resize' && (!inCircle || walked)) {
+    if (mode.type === 'resize' && !stable) {
       mode.scaleT += dt;
       const s = mode.baseScale + Math.sin(mode.scaleT * 4) * 0.7;
       mode.win.group.scale.setScalar(Math.max(0.4, Math.min(2.5, s)));
     }
 
-    updateModeVisuals();
+    updateModeVisuals(placement);
 
     if (mode.progress >= MODE_DURATION) {
+      if (mode.type === 'move') {
+        orientWindowToPlacement(mode.win, placement);
+      }
       mode = null;
       hideModeVisuals();
     }
   }
 
-  /* ============================================================
-     Text input
-     ============================================================ */
-  let editInput = null;
-  let editingWin = null;
-  let lastEditEnd = 0;
+  /* ============ Text input ============ */
+  let editInput = null, editingWin = null, lastEditEnd = 0;
 
   function ensureInput() {
     if (editInput) return editInput;
@@ -935,8 +812,7 @@
     Object.assign(editInput.style, {
       position: 'fixed', left: '50%', top: '25%',
       transform: 'translate(-50%, -50%)',
-      width: '78%', maxWidth: '440px',
-      boxSizing: 'border-box',
+      width: '78%', maxWidth: '440px', boxSizing: 'border-box',
       padding: '14px 18px', fontSize: '20px',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
       background: '#0d0d11', color: '#e9f8ff',
@@ -962,12 +838,10 @@
   function warmUpKeyboard() {
     if (warmInput) return;
     warmInput = document.createElement('input');
-    warmInput.type = 'text';
-    warmInput.setAttribute('autocomplete', 'off');
+    warmInput.type = 'text'; warmInput.setAttribute('autocomplete', 'off');
     Object.assign(warmInput.style, {
-      position: 'fixed', left: '50%', top: '0',
-      width: '1px', height: '1px', padding: '0',
-      border: 'none', outline: 'none', opacity: '0',
+      position: 'fixed', left: '50%', top: '0', width: '1px', height: '1px',
+      padding: '0', border: 'none', outline: 'none', opacity: '0',
       pointerEvents: 'none', zIndex: -1
     });
     document.body.appendChild(warmInput);
@@ -998,20 +872,17 @@
     setTimeout(tryFocus, 80);
     setTimeout(tryFocus, 200);
   }
-
   function commitEdit() {
     if (!editingWin || !editInput) return;
     const win = editingWin;
     editingWin = null;
     lastEditEnd = performance.now();
     const value = editInput.value;
-    if (win.flipped) win.textBack = value;
-    else win.textFront = value;
+    if (win.flipped) win.textBack = value; else win.textFront = value;
     refreshWindow(win);
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
   }
-
   function cancelEdit() {
     if (!editInput) return;
     editingWin = null;
@@ -1020,9 +891,7 @@
     try { editInput.blur(); } catch (e) {}
   }
 
-  /* ============================================================
-     Gyro / fallback look
-     ============================================================ */
+  /* ============ Gyro / fallback ============ */
   let gyroOn = false, gyroFailed = false, requestInFlight = false, gotOrientation = false;
   const dev = { alpha: 0, beta: 0, gamma: 0 };
   let screenOrient = window.orientation || 0;
@@ -1032,9 +901,7 @@
     gotOrientation = true;
     dev.alpha = e.alpha || 0; dev.beta = e.beta || 0; dev.gamma = e.gamma || 0;
   });
-  window.addEventListener('orientationchange', function () {
-    screenOrient = window.orientation || 0;
-  });
+  window.addEventListener('orientationchange', function () { screenOrient = window.orientation || 0; });
 
   function tryEnableGyro() {
     if (gyroOn || requestInFlight || gyroFailed) return;
@@ -1042,16 +909,10 @@
         typeof DeviceOrientationEvent.requestPermission === 'function') {
       requestInFlight = true;
       DeviceOrientationEvent.requestPermission()
-        .then(function (p) {
-          requestInFlight = false;
-          if (p === 'granted') gyroOn = true; else gyroFailed = true;
-        })
+        .then(function (p) { requestInFlight = false; if (p === 'granted') gyroOn = true; else gyroFailed = true; })
         .catch(function () { requestInFlight = false; gyroFailed = true; });
-    } else {
-      gyroOn = true;
-    }
+    } else gyroOn = true;
   }
-
   document.addEventListener('touchstart', tryEnableGyro, { passive: true });
   document.addEventListener('click', tryEnableGyro);
 
@@ -1071,14 +932,9 @@
   let lookMode = false;
   let lookYaw = 0, lookPitch = 0;
   const _lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
-  function applyLook() {
-    _lookEuler.set(lookPitch, lookYaw, 0, 'YXZ');
-    camera.quaternion.setFromEuler(_lookEuler);
-  }
+  function applyLook() { _lookEuler.set(lookPitch, lookYaw, 0, 'YXZ'); camera.quaternion.setFromEuler(_lookEuler); }
 
-  /* ============================================================
-     Resize
-     ============================================================ */
+  /* ============ Resize ============ */
   function resize() {
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
@@ -1091,52 +947,36 @@
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
-  /* ============================================================
-     Joystick
-     ============================================================ */
+  /* ============ Joystick ============ */
   const joystickEl = document.getElementById('joystick');
   const joystickKnob = document.getElementById('joystick-knob');
   const joystickVec = { x: 0, z: 0 };
-  let joystickActive = false;
-  let joystickPointerId = null;
+  let joystickActive = false, joystickPointerId = null;
 
   function updateJoystickPos(e) {
     const rect = joystickEl.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    let dx = e.clientX - cx;
-    let dy = e.clientY - cy;
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    let dx = e.clientX - cx, dy = e.clientY - cy;
     const maxR = rect.width / 2 - 15;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > maxR) {
-      dx = dx / dist * maxR;
-      dy = dy / dist * maxR;
-    }
-    joystickVec.x = dx / maxR;
-    joystickVec.z = -dy / maxR;
+    if (dist > maxR) { dx = dx / dist * maxR; dy = dy / dist * maxR; }
+    joystickVec.x = dx / maxR; joystickVec.z = -dy / maxR;
     joystickKnob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
   }
-
   function resetJoystick() {
-    joystickActive = false;
-    joystickPointerId = null;
-    joystickVec.x = 0;
-    joystickVec.z = 0;
+    joystickActive = false; joystickPointerId = null;
+    joystickVec.x = 0; joystickVec.z = 0;
     joystickKnob.style.transform = 'translate(0, 0)';
   }
-
   joystickEl.addEventListener('pointerdown', function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    joystickActive = true;
-    joystickPointerId = e.pointerId;
+    e.preventDefault(); e.stopPropagation();
+    joystickActive = true; joystickPointerId = e.pointerId;
     try { joystickEl.setPointerCapture(e.pointerId); } catch (err) {}
     updateJoystickPos(e);
   });
   joystickEl.addEventListener('pointermove', function (e) {
     if (!joystickActive || e.pointerId !== joystickPointerId) return;
-    e.preventDefault();
-    updateJoystickPos(e);
+    e.preventDefault(); updateJoystickPos(e);
   });
   joystickEl.addEventListener('pointerup', function (e) {
     if (!joystickActive || e.pointerId !== joystickPointerId) return;
@@ -1144,31 +984,21 @@
   });
   joystickEl.addEventListener('pointercancel', resetJoystick);
 
-  /* ============================================================
-     Action buttons
-     ============================================================ */
+  /* ============ Action buttons ============ */
   const btnBuild = document.getElementById('btn-build');
   const btnDestroy = document.getElementById('btn-destroy');
   const btnJump = document.getElementById('btn-jump');
-
   function bindTap(el, fn) {
-    el.addEventListener('pointerdown', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      fn();
-    });
+    el.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); fn(); });
   }
   bindTap(btnBuild, buildBlock);
   bindTap(btnDestroy, destroyBlock);
   bindTap(btnJump, doJump);
 
-  /* ============================================================
-     Start / canvas input
-     ============================================================ */
+  /* ============ Start / canvas input ============ */
   const startScreen = document.getElementById('start-screen');
   const crosshair = document.getElementById('crosshair');
-  let started = false;
-  let consumeNextTap = false;
+  let started = false, consumeNextTap = false;
 
   function begin() {
     if (started) return;
@@ -1184,11 +1014,7 @@
     tryEnableGyro();
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     setTimeout(function () {
-      if (!gotOrientation && !gyroOn) {
-        gyroOn = false;
-        gyroFailed = true;
-        lookMode = true;
-      }
+      if (!gotOrientation && !gyroOn) { gyroOn = false; gyroFailed = true; lookMode = true; }
     }, 2500);
   }
   startScreen.addEventListener('pointerdown', begin);
@@ -1197,11 +1023,7 @@
 
   canvas.addEventListener('pointerdown', function (e) {
     if (!started) return;
-    if (editingWin) {
-      commitEdit();
-      consumeNextTap = true;
-      return;
-    }
+    if (editingWin) { commitEdit(); consumeNextTap = true; return; }
     pointerInfo = {
       id: e.pointerId, lastX: e.clientX, lastY: e.clientY,
       moved: 0, t: performance.now()
@@ -1210,13 +1032,11 @@
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
     }
   });
-
   canvas.addEventListener('pointermove', function (e) {
     if (!pointerInfo || e.pointerId !== pointerInfo.id) return;
     const dx = e.clientX - pointerInfo.lastX;
     const dy = e.clientY - pointerInfo.lastY;
-    pointerInfo.lastX = e.clientX;
-    pointerInfo.lastY = e.clientY;
+    pointerInfo.lastX = e.clientX; pointerInfo.lastY = e.clientY;
     pointerInfo.moved += Math.abs(dx) + Math.abs(dy);
     if (lookMode && !mode && !editingWin) {
       lookYaw -= dx * 0.0045;
@@ -1224,7 +1044,6 @@
       lookPitch = Math.max(-1.25, Math.min(1.25, lookPitch));
     }
   });
-
   canvas.addEventListener('pointerup', function (e) {
     if (consumeNextTap) { consumeNextTap = false; pointerInfo = null; return; }
     if (!pointerInfo || e.pointerId !== pointerInfo.id) { pointerInfo = null; return; }
@@ -1233,35 +1052,30 @@
     if (!started) return;
     if (performance.now() - lastEditEnd < 300) return;
     if (info.moved < 12 && performance.now() - info.t < 700) {
-      if (!mode && !editingWin) createWindowCenter();
+      if (mode) { mode = null; hideModeVisuals(); }
+      else if (!editingWin) createWindowCenter();
     }
   });
-
   canvas.addEventListener('pointercancel', function () { pointerInfo = null; });
 
-  /* ============================================================
-     Render
-     ============================================================ */
+  /* ============ Render loop ============ */
   let lastTime = performance.now();
-
   function render(now) {
     requestAnimationFrame(render);
     const t = (typeof now === 'number') ? now : performance.now();
     const dt = Math.min(0.05, Math.max(0, (t - lastTime) / 1000));
     lastTime = t;
-
     if (gyroOn) applyGyro();
     else if (lookMode) applyLook();
-
     if (started) {
       updatePlayer(dt);
       updateChunks();
+      updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
     } else {
       camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     }
-
     renderer.render(scene, camera);
   }
 
@@ -1269,7 +1083,6 @@
   setTimeout(resize, 50);
   setTimeout(resize, 200);
   setTimeout(resize, 800);
-
   requestAnimationFrame(render);
 })();
 </script>
