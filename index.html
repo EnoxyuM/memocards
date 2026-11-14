@@ -1,611 +1,561 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>360° Panorama Mobile Viewer</title>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,minimum-scale=1.0,maximum-scale=5.0,user-scalable=yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<title>360 Panorama Test</title>
+
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body {
-  width: 100%; height: 100%;
-  overflow: hidden;
-  background: #000;
-  font-family: 'Roboto Condensed', sans-serif;
-  touch-action: none;
-}
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; }
+  #wrap { min-height: 0; height: 100%; }
+  #pano_container { position: relative; width: 100%; height: 100%; }
+  #mobile_krp_div { width: 100%; height: 100%; }
+  #mobile_pano_object { width: 100%; height: 100%; position: relative; }
+  #pano-canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 
-#pano_container {
-  position: relative;
-  width: 100%;
-  height: 100vh;
-}
+  /* --- ИЗ ИСХОДНИКА: кнопки панорамы --- */
+  @media all and (orientation: portrait) {
+    #normal_screen_pano_buttons { height: 16%; width: 70%; }
+    #fullscreen_pano_buttons    { height: 10%; width: 50%; }
+    .mobile_pano_vr_view img { margin-left: 0; }
+    .mobile_gyro_toggle img  { margin-left: 20px; }
+  }
+  @media all and (orientation: landscape) {
+    #normal_screen_pano_buttons { height: 24%; width: 30%; }
+    #fullscreen_pano_buttons    { height: 14%; width: 35%; }
+  }
 
-#mobile_pano_object {
-  width: 100%; height: 100%;
-}
+  #normal_screen_pano_buttons .mobile_icon { height: 40%; }
+  #normal_screen_pano_buttons {
+    display: inline-block;
+    position: absolute;
+    top: 0; right: 0;
+    z-index: 100;
+  }
+  #fullscreen_pano_buttons {
+    display: none;
+    position: absolute;
+    top: 0; right: 0;
+    z-index: 100;
+  }
+  #fullscreen_pano_buttons div { height: 100%; width: 30%; display: inline-block; }
 
-#mobile_krp_div {
-  width: 100%; height: 100%;
-}
+  .mobile_icon {
+    opacity: 0.8;
+    margin-top: 30%;
+    margin-left: auto;
+    margin-right: auto;
+    display: block;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #fullscreen_pano_buttons .mobile_icon { height: 50%; }
+  #normal_screen_pano_buttons div { height: 100%; width: 20%; display: inline-block; }
+  .mobile_pano_vr_view, .mobile_gyro_toggle { float: left; }
 
-canvas#glcanvas {
-  width: 100%; height: 100%;
-  display: block;
-  touch-action: none;
-}
+  /* --- ИЗ ИСХОДНИКА: подпись под панорамой --- */
+  #mobile_pano_labels {
+    display: inline-block;
+    position: absolute;
+    bottom: 0; left: 0;
+    width: 100%;
+    background: none;
+    opacity: 0.80;
+    text-shadow: -1px 0 2px black, 0 1px 2px black, 1px 0 2px black, 0 -1px 2px black;
+    font-family: 'Roboto Condensed', sans-serif;
+    font-size: 16px;
+    color: #FFFFFF;
+    margin-bottom: 6px;
+    padding-left: 6px;
+    padding-right: 6px;
+    box-sizing: border-box;
+    pointer-events: none;
+    z-index: 50;
+  }
+  #mobile_pano_labels a { color: #FFFFFF !important; pointer-events: auto; }
 
-/* ---------- mobile pano buttons ---------- */
-@media all and (orientation: portrait) {
-  #normal_screen_pano_buttons { height: 16%; width: 70%; }
-  #fullscreen_pano_buttons { height: 10%; width: 50%; }
-}
-@media all and (orientation: landscape) {
-  #normal_screen_pano_buttons { height: 24%; width: 30%; }
-  #fullscreen_pano_buttons { height: 14%; width: 35%; }
-}
-
-#normal_screen_pano_buttons .mobile_icon { height: 40%; }
-#normal_screen_pano_buttons {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: absolute;
-  top: 0; right: 0;
-  z-index: 10;
-  padding: 8px;
-}
-#fullscreen_pano_buttons {
-  display: none;
-  justify-content: space-between;
-  align-items: center;
-  position: absolute;
-  top: 0; right: 0;
-  z-index: 10;
-  padding: 8px;
-  width: 80%;
-}
-#fullscreen_pano_buttons div {
-  height: 100%;
-  display: inline-flex;
-  align-items: center;
-}
-
-.mobile_icon {
-  opacity: 0.8;
-  width: 36px; height: 36px;
-  display: block;
-  cursor: pointer;
-  filter: drop-shadow(0 0 3px rgba(0,0,0,.6));
-}
-#fullscreen_pano_buttons .mobile_icon { height: 50%; width: auto; }
-
-#normal_screen_pano_buttons div {
-  display: inline-flex;
-  align-items: center;
-}
-
-/* ---------- labels ---------- */
-#mobile_pano_labels {
-  display: inline-block;
-  position: absolute;
-  bottom: 0; left: 0;
-  width: 100%;
-  opacity: 0.80;
-  text-shadow: -1px 0 2px #000, 0 1px 2px #000, 1px 0 2px #000, 0 -1px 2px #000;
-  font-size: 16px;
-  color: #fff;
-  padding: 6px;
-  z-index: 10;
-}
-#mobile_pano_labels a { color: #fff !important; text-decoration: none; }
-
-/* ---------- share menu ---------- */
-#pano_share_menu_mobile {
-  width: 340px;
-  background: rgba(62,66,70,.85);
-  display: none;
-  left: calc(50vw - 170px);
-  top: 1vh;
-  position: absolute;
-  border-radius: 4px;
-  padding: 16px;
-  border: 1px solid rgba(212,212,212,.7);
-  z-index: 100;
-  color: #fff;
-}
-#pano_share_menu_mobile .close_share {
-  position: absolute; top: 8px; right: 12px;
-  font-weight: bold; font-size: 20px; cursor: pointer;
-}
-
-/* ---------- gyro indicator ---------- */
-#gyro_indicator {
-  position: absolute;
-  top: 50px; left: 10px;
-  color: #0f0;
-  font-size: 12px;
-  z-index: 10;
-  display: none;
-  text-shadow: 0 0 4px #000;
-}
+  /* --- ИЗ ИСХОДНИКА: меню Share --- */
+  #pano_share_menu_mobile {
+    display: none;
+    position: absolute;
+    left: 50%; top: 20px;
+    transform: translateX(-50%);
+    width: 320px;
+    padding: 16px;
+    border-radius: 6px;
+    background-color: rgba(62, 66, 70, 0.92);
+    border: 1px solid rgba(212, 212, 212, 0.7);
+    z-index: 200;
+    box-sizing: border-box;
+    font-family: sans-serif;
+  }
+  #pano_share_menu_mobile .share-title {
+    color: #fff; font-weight: bold; font-size: 18px; display: block; margin-bottom: 10px;
+  }
+  #pano_share_menu_mobile .share-close {
+    position: absolute; top: 8px; right: 12px;
+    color: #fff; font-size: 22px; font-weight: bold;
+    cursor: pointer; line-height: 1;
+  }
+  #pano_share_menu_mobile .share-row { display: flex; gap: 8px; margin-top: 10px; }
+  #pano_share_menu_mobile input {
+    flex: 1; min-width: 0; padding: 8px;
+    border: 1px solid #ccc; border-radius: 4px; font-size: 13px; box-sizing: border-box;
+  }
+  #pano_share_menu_mobile button {
+    padding: 8px 14px; border: 0; border-radius: 4px;
+    background: #c33135; color: #fff; font-weight: bold; cursor: pointer;
+  }
 </style>
 </head>
 <body>
+<div id="wrap">
+  <div id="pano_container">
+    <div id="mobile_pano_object">
 
-<div id="pano_container">
-  <div id="mobile_pano_object">
-    <div id="mobile_krp_div">
-      <canvas id="glcanvas"></canvas>
-    </div>
-  </div>
+      <div id="mobile_krp_div">
+        <canvas id="pano-canvas"></canvas>
+      </div>
 
-  <!-- normal screen buttons -->
-  <div id="normal_screen_pano_buttons">
-    <div class="mobile_pano_vr_view">
-      <svg class="mobile_icon" viewBox="0 0 48 48" fill="#fff"><path d="M44 12H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12l3.2-4.8a3 3 0 0 1 5.6 0L28 32h16a2 2 0 0 0 2-2V14a2 2 0 0 0-2-2zM14 26a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm20 0a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg>
-    </div>
-    <div class="mobile_gyro_toggle">
-      <svg class="mobile_icon" id="gyro_icon" viewBox="0 0 48 48" fill="#fff"><circle cx="24" cy="24" r="18" fill="none" stroke="#fff" stroke-width="3"/><circle cx="24" cy="24" r="6"/><line x1="24" y1="2" x2="24" y2="10" stroke="#fff" stroke-width="3"/><line x1="24" y1="38" x2="24" y2="46" stroke="#fff" stroke-width="3"/><line x1="2" y1="24" x2="10" y2="24" stroke="#fff" stroke-width="3"/><line x1="38" y1="24" x2="46" y2="24" stroke="#fff" stroke-width="3"/></svg>
-    </div>
-    <div class="mobile_pano_share_view">
-      <svg class="mobile_icon" viewBox="0 0 48 48" fill="#fff"><circle cx="36" cy="10" r="5"/><circle cx="12" cy="24" r="5"/><circle cx="36" cy="38" r="5"/><line x1="16.5" y1="21.5" x2="31.5" y2="12.5" stroke="#fff" stroke-width="2.5"/><line x1="16.5" y1="26.5" x2="31.5" y2="35.5" stroke="#fff" stroke-width="2.5"/></svg>
-    </div>
-    <div id="mobile_pano_fullscreen">
-      <svg class="mobile_icon" viewBox="0 0 48 48" fill="#fff"><path d="M6 6h12v4H10v8H6V6zm36 0v12h-4V10h-8V6h12zM6 42v-12h4v8h8v4H6zm36 0H30v-4h8v-8h4v12z"/></svg>
-    </div>
-  </div>
+      <!-- Обычные кнопки -->
+      <div id="normal_screen_pano_buttons" style="display:flex; justify-content:space-between;">
+        <div class="mobile_pano_vr_view">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="vr-btn">
+            <rect x="8" y="30" width="84" height="40" rx="10" fill="none" stroke="white" stroke-width="4"/>
+            <circle cx="35" cy="50" r="10" fill="none" stroke="white" stroke-width="3"/>
+            <circle cx="65" cy="50" r="10" fill="none" stroke="white" stroke-width="3"/>
+          </svg>
+        </div>
+        <div class="mobile_gyro_toggle">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="gyro-btn">
+            <circle cx="50" cy="50" r="28" fill="none" stroke="white" stroke-width="3" opacity="0.4"/>
+            <path d="M50 22 A28 28 0 0 1 78 50" fill="none" stroke="white" stroke-width="4"/>
+            <path d="M78 50 L71 42 M78 50 L85 42" stroke="white" stroke-width="4" fill="none"/>
+          </svg>
+        </div>
+        <div class="mobile_pano_share_view">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="share-btn">
+            <circle cx="72" cy="25" r="10" fill="white"/>
+            <circle cx="72" cy="75" r="10" fill="white"/>
+            <circle cx="28" cy="50" r="10" fill="white"/>
+            <line x1="37" y1="45" x2="63" y2="30" stroke="white" stroke-width="4"/>
+            <line x1="37" y1="55" x2="63" y2="70" stroke="white" stroke-width="4"/>
+          </svg>
+        </div>
+        <div id="mobile_pano_fullscreen" style="color:white; margin-right:12px;">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="fullscreen-btn">
+            <polyline points="15,35 15,15 35,15" fill="none" stroke="white" stroke-width="5"/>
+            <polyline points="65,15 85,15 85,35" fill="none" stroke="white" stroke-width="5"/>
+            <polyline points="15,65 15,85 35,85" fill="none" stroke="white" stroke-width="5"/>
+            <polyline points="85,65 85,85 65,85" fill="none" stroke="white" stroke-width="5"/>
+          </svg>
+        </div>
+      </div>
 
-  <!-- fullscreen buttons -->
-  <div id="fullscreen_pano_buttons">
-    <div class="mobile_pano_vr_view" style="margin:auto;">
-      <svg class="mobile_icon" viewBox="0 0 48 48" fill="#fff"><path d="M44 12H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12l3.2-4.8a3 3 0 0 1 5.6 0L28 32h16a2 2 0 0 0 2-2V14a2 2 0 0 0-2-2zM14 26a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm20 0a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg>
-    </div>
-    <div class="mobile_gyro_toggle" style="margin:auto;">
-      <svg class="mobile_icon" id="gyro_icon_fs" viewBox="0 0 48 48" fill="#fff"><circle cx="24" cy="24" r="18" fill="none" stroke="#fff" stroke-width="3"/><circle cx="24" cy="24" r="6"/><line x1="24" y1="2" x2="24" y2="10" stroke="#fff" stroke-width="3"/><line x1="24" y1="38" x2="24" y2="46" stroke="#fff" stroke-width="3"/><line x1="2" y1="24" x2="10" y2="24" stroke="#fff" stroke-width="3"/><line x1="38" y1="24" x2="46" y2="24" stroke="#fff" stroke-width="3"/></svg>
-    </div>
-    <div class="mobile_pano_share_view" style="margin-left:-8px;">
-      <svg class="mobile_icon" viewBox="0 0 48 48" fill="#fff"><circle cx="36" cy="10" r="5"/><circle cx="12" cy="24" r="5"/><circle cx="36" cy="38" r="5"/><line x1="16.5" y1="21.5" x2="31.5" y2="12.5" stroke="#fff" stroke-width="2.5"/><line x1="16.5" y1="26.5" x2="31.5" y2="35.5" stroke="#fff" stroke-width="2.5"/></svg>
-    </div>
-    <div id="mobile_pano_exit_fullscreen" style="margin-left:-14px;">
-      <svg class="mobile_icon" viewBox="0 0 48 48" fill="#fff"><path d="M18 6v12H6v-4h8V6h4zm12 0v8h8v4H30V6h-4zM18 30v12h-4v-8H6v-4h12zm12 0h12v4h-8v8h-4V30z" transform="translate(6,0)"/></svg>
-    </div>
-  </div>
+      <!-- Кнопки во fullscreen -->
+      <div id="fullscreen_pano_buttons" style="display:none; justify-content:space-between; width:80%">
+        <div class="mobile_pano_vr_view" style="margin:auto;">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="vr-btn-fs">
+            <rect x="8" y="30" width="84" height="40" rx="10" fill="none" stroke="white" stroke-width="4"/>
+            <circle cx="35" cy="50" r="10" fill="none" stroke="white" stroke-width="3"/>
+            <circle cx="65" cy="50" r="10" fill="none" stroke="white" stroke-width="3"/>
+          </svg>
+        </div>
+        <div class="mobile_gyro_toggle" style="margin:auto;">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="gyro-btn-fs">
+            <circle cx="50" cy="50" r="28" fill="none" stroke="white" stroke-width="3" opacity="0.4"/>
+            <path d="M50 22 A28 28 0 0 1 78 50" fill="none" stroke="white" stroke-width="4"/>
+            <path d="M78 50 L71 42 M78 50 L85 42" stroke="white" stroke-width="4" fill="none"/>
+          </svg>
+        </div>
+        <div class="mobile_pano_share_view" style="margin-left:-8px;">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="share-btn-fs">
+            <circle cx="72" cy="25" r="10" fill="white"/>
+            <circle cx="72" cy="75" r="10" fill="white"/>
+            <circle cx="28" cy="50" r="10" fill="white"/>
+            <line x1="37" y1="45" x2="63" y2="30" stroke="white" stroke-width="4"/>
+            <line x1="37" y1="55" x2="63" y2="70" stroke="white" stroke-width="4"/>
+          </svg>
+        </div>
+        <div id="mobile_pano_exit_fullscreen" style="margin-left:-14px;">
+          <svg class="mobile_icon" viewBox="0 0 100 100" id="exit-fullscreen-btn">
+            <polyline points="35,15 35,35 15,35" fill="none" stroke="white" stroke-width="5"/>
+            <polyline points="65,15 65,35 85,35" fill="none" stroke="white" stroke-width="5"/>
+            <polyline points="35,85 35,65 15,65" fill="none" stroke="white" stroke-width="5"/>
+            <polyline points="65,85 65,65 85,65" fill="none" stroke="white" stroke-width="5"/>
+          </svg>
+        </div>
+      </div>
 
-  <!-- label -->
-  <div id="mobile_pano_labels">
-    <a href="#">"Test Checkerboard Panorama"</a> by <a href="#">Demo</a>
-  </div>
+      <div id="mobile_pano_labels">
+        <a href="#">Test Panorama</a> — colored checkerboard
+      </div>
 
-  <div id="gyro_indicator">GYRO ON</div>
+      <div id="pano_share_menu_mobile">
+        <span class="share-close" id="share-close">×</span>
+        <span class="share-title">Share this panorama</span>
+        <div class="share-row">
+          <input type="text" id="pm_url_share" readonly>
+          <button id="pm_url_share_btn">Copy</button>
+        </div>
+      </div>
 
-  <!-- share menu -->
-  <div id="pano_share_menu_mobile">
-    <span class="close_share">✖</span>
-    <span style="font-weight:bold;font-size:20px;">Share this panorama</span>
-    <div style="margin-top:12px;">
-      <input type="text" style="width:100%;padding:6px;" value="https://www.360cities.net/image/test-checkerboard" readonly>
     </div>
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-// ============================================================
-//  GENERATE CHECKERBOARD EQUIRECTANGULAR TEXTURE
-//  Each cube face gets a unique colour pair
-// ============================================================
-function generateCheckerboardTexture(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
-  const cell = 32;
+(function () {
+  'use strict';
 
-  // colours per cube face direction
-  const faceColors = [
-    ['#e74c3c','#2c3e50'], // +X  (right)   red / dark
-    ['#2ecc71','#1a1a2e'], // -X  (left)    green / dark
-    ['#3498db','#f1c40f'], // +Y  (top)     blue / yellow
-    ['#9b59b6','#e67e22'], // -Y  (bottom)  purple / orange
-    ['#1abc9c','#c0392b'], // +Z  (front)   teal / dark-red
-    ['#f39c12','#8e44ad'], // -Z  (back)    orange / purple
-  ];
+  /* ============================================================
+     1. Генерация тестовой панорамы — цветная шахматная карта,
+        каждая грань куба своим цветом, в эквиректангулярной проекции
+     ============================================================ */
+  function generateTestPano() {
+    const W = 2048, H = 1024;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(W, H);
 
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      // equirect -> direction
-      const lon = (x / w) * 2 * Math.PI - Math.PI;
-      const lat = (y / h) * Math.PI - Math.PI / 2;
+    // цвета граней: FRONT, BACK, RIGHT, LEFT, TOP, BOTTOM
+    const faceColor = [
+      [255,  87,  34],  // FRONT   оранжевый
+      [ 76, 175,  80],  // BACK    зелёный
+      [ 33, 150, 243],  // RIGHT   синий
+      [255, 235,  59],  // LEFT    жёлтый
+      [156,  39, 176],  // TOP     фиолетовый
+      [  0, 188, 212]   // BOTTOM  бирюзовый
+    ];
 
-      const dx = Math.cos(lat) * Math.sin(lon);
-      const dy = -Math.sin(lat);
-      const dz = Math.cos(lat) * Math.cos(lon);
+    for (let y = 0; y < H; y++) {
+      const lat    = (H/2 - y) / (H/2) * (Math.PI/2);
+      const cosLat = Math.cos(lat);
+      const sinLat = Math.sin(lat);
+      for (let x = 0; x < W; x++) {
+        const lon = (x / W) * 2 * Math.PI - Math.PI;
+        const dx  = cosLat * Math.sin(lon);
+        const dy  = sinLat;
+        const dz  = cosLat * Math.cos(lon);
 
-      // determine dominant face
-      const ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
-      let face;
-      if (ax >= ay && ax >= az) face = dx > 0 ? 0 : 1;
-      else if (ay >= ax && ay >= az) face = dy > 0 ? 2 : 3;
-      else face = dz > 0 ? 4 : 5;
+        const ax = Math.abs(dx), ay = Math.abs(dy), az = Math.abs(dz);
+        let face, u, v;
+        if (ax >= ay && ax >= az) {
+          if (dx > 0) { face = 2; u = -dz/ax; v = -dy/ax; }
+          else        { face = 3; u =  dz/ax; v = -dy/ax; }
+        } else if (ay >= ax && ay >= az) {
+          if (dy > 0) { face = 4; u = dx/ay; v =  dz/ay; }
+          else        { face = 5; u = dx/ay; v = -dz/ay; }
+        } else {
+          if (dz > 0) { face = 0; u =  dx/az; v = -dy/az; }
+          else        { face = 1; u = -dx/az; v = -dy/az; }
+        }
+        u = (u + 1) / 2;
+        v = (v + 1) / 2;
 
-      // project to face UV for checkerboard
-      let u, v;
-      switch (face) {
-        case 0: u = -dz/ax; v = -dy/ax; break;
-        case 1: u =  dz/ax; v = -dy/ax; break;
-        case 2: u =  dx/ay; v =  dz/ay; break;
-        case 3: u =  dx/ay; v = -dz/ay; break;
-        case 4: u =  dx/az; v = -dy/az; break;
-        case 5: u = -dx/az; v = -dy/az; break;
+        const checker = (Math.floor(u * 8) + Math.floor(v * 8)) & 1;
+        const c = faceColor[face];
+        const k = checker ? 0.55 : 1.0;
+
+        const i = (y * W + x) * 4;
+        img.data[i]     = c[0] * k;
+        img.data[i + 1] = c[1] * k;
+        img.data[i + 2] = c[2] * k;
+        img.data[i + 3] = 255;
       }
-
-      const ci = Math.floor((u * 0.5 + 0.5) * w / cell);
-      const cj = Math.floor((v * 0.5 + 0.5) * h / cell);
-      const idx = ((ci + cj) % 2 === 0) ? 0 : 1;
-
-      ctx.fillStyle = faceColors[face][idx];
-      ctx.fillRect(x, y, 1, 1);
     }
-  }
-  return c;
-}
+    ctx.putImageData(img, 0, 0);
 
-// ============================================================
-//  WEBGL 360 VIEWER
-// ============================================================
-const canvas = document.getElementById('glcanvas');
-const gl = canvas.getContext('webgl', { antialias: true });
+    // подписи на гранях
+    ctx.font = 'bold 110px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 12;
 
-let lon = 0, lat = 0;
-let targetLon = 0, targetLat = 0;
-let gyroEnabled = false;
-let stereoMode = false;
-let isFullscreen = false;
-
-// --- shaders ---
-const vsSrc = `
-  attribute vec3 aPos;
-  uniform mat4 uProj;
-  uniform mat4 uView;
-  varying vec3 vDir;
-  void main(){
-    vDir = aPos;
-    gl_Position = uProj * uView * vec4(aPos, 1.0);
-  }
-`;
-const fsSrc = `
-  precision mediump float;
-  varying vec3 vDir;
-  uniform sampler2D uTex;
-  const float PI = 3.14159265359;
-  void main(){
-    vec3 d = normalize(vDir);
-    float lon = atan(d.x, d.z);
-    float lat = asin(clamp(d.y, -1.0, 1.0));
-    vec2 uv = vec2(lon / (2.0*PI) + 0.5, 0.5 - lat / PI);
-    gl_FragColor = texture2D(uTex, uv);
-  }
-`;
-
-function compileShader(src, type) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  return s;
-}
-
-const prog = gl.createProgram();
-gl.attachShader(prog, compileShader(vsSrc, gl.VERTEX_SHADER));
-gl.attachShader(prog, compileShader(fsSrc, gl.FRAGMENT_SHADER));
-gl.linkProgram(prog);
-gl.useProgram(prog);
-
-// --- sphere geometry ---
-const SEG = 64, RINGS = 48;
-const verts = [], indices = [];
-for (let r = 0; r <= RINGS; r++) {
-  const theta = r / RINGS * Math.PI;
-  for (let s = 0; s <= SEG; s++) {
-    const phi = s / SEG * 2 * Math.PI;
-    verts.push(
-      50 * Math.sin(theta) * Math.sin(phi),
-      50 * Math.cos(theta),
-      50 * Math.sin(theta) * Math.cos(phi)
-    );
-  }
-}
-for (let r = 0; r < RINGS; r++) {
-  for (let s = 0; s < SEG; s++) {
-    const a = r * (SEG + 1) + s;
-    const b = a + SEG + 1;
-    indices.push(a, b, a + 1, b, b + 1, a + 1);
-  }
-}
-
-const vbo = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
-
-const ibo = gl.createBuffer();
-gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-
-const aPos = gl.getAttribLocation(prog, 'aPos');
-gl.enableVertexAttribArray(aPos);
-gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
-
-const uProj = gl.getUniformLocation(prog, 'uProj');
-const uView = gl.getUniformLocation(prog, 'uView');
-const uTex  = gl.getUniformLocation(prog, 'uTex');
-
-// --- texture ---
-const texCanvas = generateCheckerboardTexture(2048, 1024);
-const tex = gl.createTexture();
-gl.bindTexture(gl.TEXTURE_2D, tex);
-gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texCanvas);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-gl.uniform1i(uTex, 0);
-
-// --- matrix helpers ---
-function perspective(fov, aspect, near, far) {
-  const f = 1 / Math.tan(fov / 2);
-  const nf = 1 / (near - far);
-  return [
-    f/aspect,0,0,0,
-    0,f,0,0,
-    0,0,(far+near)*nf,-1,
-    0,0,2*far*near*nf,0
-  ];
-}
-
-function lookMatrix(lonDeg, latDeg) {
-  const lr = lonDeg * Math.PI / 180;
-  const pr = latDeg * Math.PI / 180;
-  const cx = Math.cos(pr) * Math.sin(lr);
-  const cy = Math.sin(pr);
-  const cz = Math.cos(pr) * Math.cos(lr);
-  // simple lookAt from origin
-  const f = [cx, cy, cz];
-  const r = [Math.cos(lr), 0, -Math.sin(lr)];
-  const u = [
-    r[1]*f[2]-r[2]*f[1],
-    r[2]*f[0]-r[0]*f[2],
-    r[0]*f[1]-r[1]*f[0]
-  ];
-  // recompute proper up
-  const up = [
-    f[1]*u[2]-f[2]*u[1],
-    f[2]*u[0]-f[0]*u[2],
-    f[0]*u[1]-f[1]*u[0]
-  ];
-  return [
-    r[0],up[0],-f[0],0,
-    r[1],up[1],-f[1],0,
-    r[2],up[2],-f[2],0,
-    0,0,0,1
-  ];
-}
-
-// ============================================================
-//  RENDER
-// ============================================================
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width  = canvas.clientWidth  * dpr;
-  canvas.height = canvas.clientHeight * dpr;
-  gl.viewport(0, 0, canvas.width, canvas.height);
-}
-window.addEventListener('resize', resize);
-resize();
-
-function drawView(x, y, w, h, lonV, latV) {
-  gl.viewport(x, y, w, h);
-  gl.scissor(x, y, w, h);
-  const proj = perspective(75 * Math.PI / 180, w / h, 0.1, 200);
-  const view = lookMatrix(lonV, latV);
-  gl.uniformMatrix4fv(uProj, false, proj);
-  gl.uniformMatrix4fv(uView, false, view);
-  gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
-}
-
-function render() {
-  lon += (targetLon - lon) * 0.15;
-  lat += (targetLat - lat) * 0.15;
-
-  gl.enable(gl.SCISSOR_TEST);
-  gl.clearColor(0, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  gl.disable(gl.DEPTH_TEST);
-
-  if (stereoMode) {
-    const hw = canvas.width / 2;
-    const hh = canvas.height / 2;
-    // left eye
-    drawView(0, hh, hw, hh, lon - 1, lat);
-    // right eye
-    drawView(hw, hh, hw, hh, lon + 1, lat);
-    // bottom halves black
-    gl.clearColor(0,0,0,1);
-    gl.scissor(0, 0, canvas.width, hh);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-  } else {
-    drawView(0, 0, canvas.width, canvas.height, lon, lat);
-  }
-
-  requestAnimationFrame(render);
-}
-render();
-
-// ============================================================
-//  TOUCH CONTROLS
-// ============================================================
-let touching = false, lastX = 0, lastY = 0;
-
-canvas.addEventListener('touchstart', e => {
-  if (gyroEnabled) return;
-  touching = true;
-  lastX = e.touches[0].clientX;
-  lastY = e.touches[0].clientY;
-}, { passive: false });
-
-canvas.addEventListener('touchmove', e => {
-  if (!touching || gyroEnabled) return;
-  e.preventDefault();
-  const dx = e.touches[0].clientX - lastX;
-  const dy = e.touches[0].clientY - lastY;
-  targetLon -= dx * 0.25;
-  targetLat += dy * 0.25;
-  targetLat = Math.max(-85, Math.min(85, targetLat));
-  lastX = e.touches[0].clientX;
-  lastY = e.touches[0].clientY;
-}, { passive: false });
-
-canvas.addEventListener('touchend', () => { touching = false; });
-
-// mouse fallback
-canvas.addEventListener('mousedown', e => {
-  if (gyroEnabled) return;
-  touching = true; lastX = e.clientX; lastY = e.clientY;
-});
-canvas.addEventListener('mousemove', e => {
-  if (!touching || gyroEnabled) return;
-  targetLon -= (e.clientX - lastX) * 0.25;
-  targetLat += (e.clientY - lastY) * 0.25;
-  targetLat = Math.max(-85, Math.min(85, targetLat));
-  lastX = e.clientX; lastY = e.clientY;
-});
-canvas.addEventListener('mouseup', () => { touching = false; });
-
-// ============================================================
-//  GYROSCOPE (Device Orientation)
-// ============================================================
-let gyroAlpha = 0, gyroBeta = 0, gyroGamma = 0;
-let gyroReady = false;
-
-function onDeviceOrientation(e) {
-  if (e.alpha === null) return;
-  gyroReady = true;
-  gyroAlpha = e.alpha || 0;
-  gyroBeta  = e.beta  || 0;
-  gyroGamma = e.gamma || 0;
-
-  if (gyroEnabled) {
-    targetLon = -gyroAlpha;
-    targetLat = gyroBeta - 90;
-    targetLat = Math.max(-85, Math.min(85, targetLat));
-  }
-}
-
-function enableGyro() {
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    // iOS 13+
-    DeviceOrientationEvent.requestPermission().then(state => {
-      if (state === 'granted') {
-        window.addEventListener('deviceorientation', onDeviceOrientation);
-        gyroEnabled = true;
-        updateGyroUI();
+    const labels = [
+      { t: 'FRONT',  lon: 0,          lat: 0,            ink: 'white' },
+      { t: 'BACK',   lon: Math.PI,    lat: 0,            ink: 'white' },
+      { t: 'RIGHT',  lon: Math.PI/2,  lat: 0,            ink: 'white' },
+      { t: 'LEFT',   lon:-Math.PI/2,  lat: 0,            ink: 'black' },
+      { t: 'TOP',    lon: 0,          lat: Math.PI/3,    ink: 'white' },
+      { t: 'BOTTOM', lon: 0,          lat:-Math.PI/3,    ink: 'black' }
+    ];
+    labels.forEach(function (L) {
+      const x = ((L.lon + Math.PI) / (2 * Math.PI)) * W;
+      const y = ((Math.PI/2 - L.lat) / Math.PI) * H;
+      ctx.strokeStyle = 'black';
+      ctx.fillStyle   = L.ink;
+      ctx.strokeText(L.t, x, y);
+      ctx.fillText(L.t, x, y);
+      if (Math.abs(L.lon) === Math.PI) {
+        ctx.strokeText(L.t, 0, y); ctx.fillText(L.t, 0, y);
+        ctx.strokeText(L.t, W, y); ctx.fillText(L.t, W, y);
       }
     });
-  } else {
-    window.addEventListener('deviceorientation', onDeviceOrientation);
-    gyroEnabled = true;
-    updateGyroUI();
+
+    // линия горизонта
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+
+    return cv;
   }
-}
 
-function disableGyro() {
-  gyroEnabled = false;
-  updateGyroUI();
-}
+  /* ============================================================
+     2. Three.js сцена — сфера с панорамой внутри
+     ============================================================ */
+  const canvas   = document.getElementById('pano-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
 
-function toggleGyro() {
-  gyroEnabled ? disableGyro() : enableGyro();
-}
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1100);
+  camera.rotation.order = 'YXZ';   // сначала yaw, потом pitch
 
-function updateGyroUI() {
-  const ind = document.getElementById('gyro_indicator');
-  ind.style.display = gyroEnabled ? 'block' : 'none';
-  const icons = document.querySelectorAll('#gyro_icon, #gyro_icon_fs');
-  icons.forEach(ic => {
-    ic.style.opacity = gyroEnabled ? '1' : '0.5';
+  const panoTex = new THREE.CanvasTexture(generateTestPano());
+  if (THREE.SRGBColorSpace) panoTex.colorSpace = THREE.SRGBColorSpace;
+
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(500, 60, 40),
+    new THREE.MeshBasicMaterial({ map: panoTex, side: THREE.BackSide })
+  );
+  // выставляем FRONT (u=0.5) так, чтобы он оказался в -Z (куда смотрит камера по умолчанию)
+  sphere.rotation.y = Math.PI / 2;
+  scene.add(sphere);
+
+  /* ============================================================
+     3. Управление drag / touch
+     ============================================================ */
+  let lon = 0, lat = 0;
+  let lonStart = 0, latStart = 0;
+  let isDragging = false, startX = 0, startY = 0;
+  const MAX_LAT = Math.PI/2 - 0.01;
+
+  function clampLat() {
+    if (lat >  MAX_LAT) lat =  MAX_LAT;
+    if (lat < -MAX_LAT) lat = -MAX_LAT;
+  }
+
+  canvas.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 1) {
+      isDragging = true;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      lonStart = lon; latStart = lat;
+    }
+  }, { passive: true });
+
+  canvas.addEventListener('touchmove', function (e) {
+    if (!isDragging || e.touches.length !== 1 || gyroEnabled) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    lon = lonStart - dx * 0.005;
+    lat = latStart - dy * 0.005;
+    clampLat();
+  }, { passive: true });
+
+  canvas.addEventListener('touchend', function () { isDragging = false; });
+
+  canvas.addEventListener('mousedown', function (e) {
+    isDragging = true;
+    startX = e.clientX; startY = e.clientY;
+    lonStart = lon; latStart = lat;
   });
-}
+  window.addEventListener('mousemove', function (e) {
+    if (!isDragging || gyroEnabled) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    lon = lonStart - dx * 0.005;
+    lat = latStart - dy * 0.005;
+    clampLat();
+  });
+  window.addEventListener('mouseup', function () { isDragging = false; });
 
-document.querySelector('.mobile_gyro_toggle').addEventListener('click', toggleGyro);
-document.querySelectorAll('.mobile_gyro_toggle').forEach(el =>
-  el.addEventListener('click', toggleGyro)
-);
+  /* ============================================================
+     4. Гироскоп (DeviceOrientation), стандартный подход Three.js
+     ============================================================ */
+  let gyroEnabled = false;
+  const devOrient = { alpha: 0, beta: 0, gamma: 0 };
+  let screenOrient = window.orientation || 0;
 
-// ============================================================
-//  FULLSCREEN
-// ============================================================
-function enterFullscreen() {
-  const el = document.documentElement;
-  if (el.requestFullscreen) el.requestFullscreen();
-  else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-  isFullscreen = true;
-  document.getElementById('normal_screen_pano_buttons').style.display = 'none';
-  document.getElementById('fullscreen_pano_buttons').style.display = 'flex';
-}
+  window.addEventListener('deviceorientation', function (e) {
+    devOrient.alpha = e.alpha || 0;
+    devOrient.beta  = e.beta  || 0;
+    devOrient.gamma = e.gamma || 0;
+  });
+  window.addEventListener('orientationchange', function () {
+    screenOrient = window.orientation || 0;
+  });
 
-function exitFullscreen() {
-  if (document.exitFullscreen) document.exitFullscreen();
-  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-  isFullscreen = false;
-  document.getElementById('normal_screen_pano_buttons').style.display = 'flex';
-  document.getElementById('fullscreen_pano_buttons').style.display = 'none';
-}
+  const zee = new THREE.Vector3(0, 0, 1);
+  const _euler = new THREE.Euler();
+  const q0 = new THREE.Quaternion();
+  const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+  const DEG2RAD = Math.PI / 180;
 
-document.getElementById('mobile_pano_fullscreen').addEventListener('click', enterFullscreen);
-document.getElementById('mobile_pano_exit_fullscreen').addEventListener('click', exitFullscreen);
+  function applyGyroToQuat(quat) {
+    const a = devOrient.alpha * DEG2RAD;
+    const b = devOrient.beta  * DEG2RAD;
+    const g = devOrient.gamma * DEG2RAD;
+    const o = screenOrient    * DEG2RAD;
 
-document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement && isFullscreen) exitFullscreen();
-});
+    _euler.set(b, a, -g, 'YXZ');
+    quat.setFromEuler(_euler);
+    quat.multiply(q1);
+    quat.multiply(q0.setFromAxisAngle(zee, -o));
+  }
 
-// ============================================================
-//  VR / CARDBOARD (stereo toggle)
-// ============================================================
-function toggleStereo() {
-  stereoMode = !stereoMode;
-}
-document.querySelectorAll('.mobile_pano_vr_view').forEach(el =>
-  el.addEventListener('click', toggleStereo)
-);
+  function enableGyro() {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(function (p) {
+        if (p === 'granted') gyroEnabled = true;
+      }).catch(function () {});
+    } else {
+      gyroEnabled = true;
+    }
+  }
 
-// ============================================================
-//  SHARE MENU
-// ============================================================
-document.querySelectorAll('.mobile_pano_share_view').forEach(el =>
-  el.addEventListener('click', () => {
-    const m = document.getElementById('pano_share_menu_mobile');
-    m.style.display = m.style.display === 'block' ? 'none' : 'block';
-  })
-);
-document.querySelector('.close_share').addEventListener('click', () => {
-  document.getElementById('pano_share_menu_mobile').style.display = 'none';
-});
+  function toggleGyro() {
+    if (gyroEnabled) {
+      // зафиксировать текущий yaw/pitch, чтобы не дёрнулось
+      const e = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+      lon = e.y; lat = e.x;
+      gyroEnabled = false;
+    } else {
+      enableGyro();
+    }
+  }
 
-// ============================================================
-//  KEYBOARD (desktop testing)
-// ============================================================
-document.addEventListener('keydown', e => {
-  const step = 5;
-  if (e.key === 'ArrowLeft')  targetLon += step;
-  if (e.key === 'ArrowRight') targetLon -= step;
-  if (e.key === 'ArrowUp')    targetLat = Math.min(85, targetLat + step);
-  if (e.key === 'ArrowDown')  targetLat = Math.max(-85, targetLat - step);
-  if (e.key === 'f') enterFullscreen();
-  if (e.key === 'Escape') exitFullscreen();
-  if (e.key === 'g') toggleGyro();
-  if (e.key === 'v') toggleStereo();
-});
+  /* ============================================================
+     5. VR / cardboard — side-by-side стерео
+     ============================================================ */
+  let vrMode = false;
 
-console.log('INFO: krpano-style 360 viewer (WebGL clone)');
-console.log('INFO: Checkerboard test texture – 6 coloured faces');
+  function renderStereo() {
+    const w = renderer.domElement.width;
+    const h = renderer.domElement.height;
+    const halfW = Math.floor(w / 2);
+
+    camera.aspect = halfW / h;
+    camera.updateProjectionMatrix();
+
+    renderer.setScissorTest(true);
+
+    renderer.setViewport(0, 0, halfW, h);
+    renderer.setScissor(0, 0, halfW, h);
+    renderer.render(scene, camera);
+
+    renderer.setViewport(halfW, 0, halfW, h);
+    renderer.setScissor(halfW, 0, halfW, h);
+    renderer.render(scene, camera);
+  }
+
+  function toggleVR() {
+    vrMode = !vrMode;
+    if (!vrMode) {
+      renderer.setScissorTest(false);
+      resize();
+    }
+  }
+
+  /* ============================================================
+     6. Размер и цикл рендера
+     ============================================================ */
+  function resize() {
+    const container = document.getElementById('mobile_krp_div');
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    renderer.setSize(w, h, false);
+    if (!vrMode) {
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
+    }
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 120); });
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (gyroEnabled) {
+      applyGyroToQuat(camera.quaternion);
+    } else {
+      camera.rotation.y = lon;
+      camera.rotation.x = lat;
+    }
+    if (vrMode) renderStereo();
+    else        renderer.render(scene, camera);
+  }
+
+  /* ============================================================
+     7. Кнопки / Share / Fullscreen
+     ============================================================ */
+  const normalBtns = document.getElementById('normal_screen_pano_buttons');
+  const fsBtns     = document.getElementById('fullscreen_pano_buttons');
+  const shareMenu  = document.getElementById('pano_share_menu_mobile');
+
+  document.getElementById('vr-btn').addEventListener('click', toggleVR);
+  document.getElementById('vr-btn-fs').addEventListener('click', toggleVR);
+  document.getElementById('gyro-btn').addEventListener('click', toggleGyro);
+  document.getElementById('gyro-btn-fs').addEventListener('click', toggleGyro);
+
+  document.getElementById('share-btn').addEventListener('click', function () {
+    document.getElementById('pm_url_share').value = location.href;
+    shareMenu.style.display = 'block';
+  });
+  document.getElementById('share-btn-fs').addEventListener('click', function () {
+    document.getElementById('pm_url_share').value = location.href;
+    shareMenu.style.display = 'block';
+  });
+  document.getElementById('share-close').addEventListener('click', function () {
+    shareMenu.style.display = 'none';
+  });
+  document.getElementById('pm_url_share_btn').addEventListener('click', function () {
+    const inp = document.getElementById('pm_url_share');
+    inp.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    const self = this;
+    self.textContent = 'Copied!';
+    setTimeout(function () { self.textContent = 'Copy'; }, 1500);
+  });
+
+  function enterFullscreen() {
+    const el = document.getElementById('pano_container');
+    if (el.requestFullscreen)          el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    normalBtns.style.display = 'none';
+    fsBtns.style.display = 'flex';
+    setTimeout(resize, 120);
+  }
+  function exitFullscreen() {
+    if (document.exitFullscreen)          document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    normalBtns.style.display = 'flex';
+    fsBtns.style.display = 'none';
+    setTimeout(resize, 120);
+  }
+  document.getElementById('fullscreen-btn').addEventListener('click', enterFullscreen);
+  document.getElementById('exit-fullscreen-btn').addEventListener('click', exitFullscreen);
+  document.addEventListener('fullscreenchange', function () {
+    if (!document.fullscreenElement) {
+      normalBtns.style.display = 'flex';
+      fsBtns.style.display = 'none';
+      setTimeout(resize, 120);
+    }
+  });
+
+  /* ============================================================
+     8. Старт
+     ============================================================ */
+  resize();
+  animate();
+})();
 </script>
 </body>
 </html>
