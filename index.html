@@ -112,7 +112,7 @@
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.4.0</div>
+  <div id="start-version">v1.5.0</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -123,9 +123,9 @@
   if (typeof THREE === 'undefined') { console.error('[pano] Three.js не загрузился'); return; }
 
   /* ============================================================
-     VERSION — повышать при каждом обновлении страницы
+     VERSION — повышать при каждом обновлении
      ============================================================ */
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -264,8 +264,9 @@
   /* ============================================================
      Windows
      ============================================================ */
-  const WIN_W = 1.0;
-  const WIN_H = 0.75;
+  // Уменьшено в ~1.8 раза (было 1.0 × 0.75, стало 0.55 × 0.4125).
+  const WIN_W = 0.55;
+  const WIN_H = 0.4125;
   const TEX_W = 512, TEX_H = 384;
   const WINDOW_FONT = '500 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif';
   const BTN_IDS = ['close', 'move', 'resize', 'text', 'flip'];
@@ -449,19 +450,28 @@
     }
   }
 
+  // ИСПРАВЛЕНО: окно всегда разворачивается ЛИЦОМ к зрителю.
+  // Раньше при hit-test (attached) нормаль считалась от камеры к точке
+  // и получалась инвертированной — окно смотрело "спиной", текстура
+  // зеркалилась, а хитбоксы кнопок (FrontSide) не ловились рейкастом.
   function orientWindowToPlacement(win, placement) {
     win.group.position.copy(placement.pos);
-    if (placement.attached) {
-      const n = placement.normal;
-      win.group.lookAt(
-        placement.pos.x + n.x,
-        placement.pos.y + n.y,
-        placement.pos.z + n.z
-      );
-    } else {
-      const eye = getCurrentEye();
-      win.group.lookAt(eye);
+
+    const eye = getCurrentEye();
+    const toEye = eye.clone().sub(placement.pos);
+
+    if (toEye.lengthSq() < 1e-6) {
+      // Защита от вырожденного случая: eye == pos.
+      const dir = getCurrentDir();
+      toEye.copy(dir).negate();
     }
+    toEye.normalize();
+
+    win.group.lookAt(
+      placement.pos.x + toEye.x,
+      placement.pos.y + toEye.y,
+      placement.pos.z + toEye.z
+    );
   }
 
   function createWindowCenter() {
@@ -846,9 +856,8 @@
   window.addEventListener('resize', resize);
 
   /* ============================================================
-     HUD diagnostics
+     HUD
      ============================================================ */
-  let hudTimer = 0;
   function updateHUD() {
     if (!started) { hudEl.classList.remove('visible'); return; }
     hudEl.classList.add('visible');
@@ -870,7 +879,7 @@
   }
 
   /* ============================================================
-     XR session setup
+     XR session
      ============================================================ */
   async function pickRefSpaceType(session) {
     const types = ['local-floor', 'local', 'viewer'];
@@ -904,7 +913,6 @@
 
     xrSession = session;
 
-    // Выбираем лучший reference space
     activeRefSpaceType = await pickRefSpaceType(session);
     console.log('[xr] reference space:', activeRefSpaceType);
 
@@ -920,7 +928,6 @@
       return false;
     }
 
-    // Hit-test
     try {
       const viewerSpace = await session.requestReferenceSpace('viewer');
       hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
@@ -929,7 +936,6 @@
       hitTestSource = null;
     }
 
-    // Reticle
     const rg = new THREE.RingGeometry(0.08, 0.11, 32);
     rg.rotateX(-Math.PI / 2);
     reticle = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({
@@ -952,7 +958,7 @@
     return true;
   }
 
-  async function startFallback(xrReason) {
+  async function startFallback() {
     await requestCamera();
     tryEnableGyro();
     setTimeout(function () {
@@ -960,13 +966,6 @@
     }, 2500);
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
     renderer.setAnimationLoop(fallbackRenderFrame);
-
-    if (!xrReason) {
-      startModeEl.innerHTML =
-        '<span class="warn">WebXR AR недоступен на этом устройстве.</span><br>' +
-        'Окна будут закреплены в виртуальном пространстве, но НЕ в реальном мире — ' +
-        'при физическом перемещении они останутся на месте относительно вас.';
-    }
   }
 
   function onXRSessionEnd() {
@@ -1097,9 +1096,7 @@
       startModeEl.innerHTML = '<span class="warn">navigator.xr отсутствует — WebXR не поддерживается.</span>';
     }
 
-    if (!ok) {
-      await startFallback(true);
-    }
+    if (!ok) await startFallback();
 
     started = true;
     startScreen.classList.add('hidden');
@@ -1108,7 +1105,6 @@
     resize();
   }
 
-  // Показать статус поддержки XR ещё до старта
   (async function probeXR() {
     if (!navigator.xr) {
       startModeEl.innerHTML = '<span class="warn">WebXR отсутствует</span>';
