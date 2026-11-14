@@ -1,585 +1,241 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>360</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden;background:#0a0c0f;color:#cfd8e3;
-  font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
-  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
-  overscroll-behavior:none;touch-action:none}
-#world{position:fixed;inset:0;overflow:hidden;cursor:grab}
-#world:active{cursor:grabbing}
-#cross{position:fixed;left:0;top:0;width:24px;height:24px;pointer-events:none;z-index:9999;will-change:transform}
-.win{position:absolute;left:0;top:0;display:flex;flex-direction:column;overflow:hidden;
-  border-radius:10px;background:#151a21;border:1px solid #2b3542;
-  box-shadow:0 12px 34px rgba(0,0,0,.6);will-change:transform;
-  transition:background .25s ease,border-color .25s ease,box-shadow .18s ease}
-.win.flipped{background:#1a2531;border-color:#3a5470}
-.win.moving,.win.resizing{box-shadow:0 0 0 1.5px rgba(110,200,255,.6),0 12px 34px rgba(0,0,0,.6)}
-.bar{flex:0 0 28px;height:28px;display:flex;align-items:center;justify-content:flex-end;
-  gap:4px;padding:0 6px;background:rgba(255,255,255,.035);border-bottom:1px solid rgba(255,255,255,.05)}
-.btn{position:relative;width:20px;height:20px;display:grid;place-items:center;border:0;border-radius:50%;
-  background:transparent;color:#8296ab;cursor:pointer;padding:0;-webkit-appearance:none;outline:none}
-.btn svg{display:block;width:12px;height:12px;pointer-events:none;overflow:visible}
-.btn .star{fill:currentColor}
-.win.flipped .btn .star{fill:none}
-.btn:hover{background:rgba(255,255,255,.09);color:#e8f1fa}
-.btn:active{background:rgba(255,255,255,.16)}
-.btn .r1,.btn .r2{position:absolute;left:50%;top:50%;width:22px;height:22px;border-radius:50%;
-  pointer-events:none;opacity:0;transform:translate(-50%,-50%) scale(0)}
-.btn .r1{border:1.5px solid rgba(110,200,255,.9)}
-.btn .r2{background:rgba(110,200,255,.28);border:1.5px solid rgba(110,200,255,.95)}
-.btn.charge .r1{opacity:1;transform:translate(-50%,-50%) scale(1)}
-.btn.charge .r2{opacity:1}
-.body{position:relative;flex:1;min-height:0}
-.face{position:absolute;inset:0;padding:8px 10px;overflow:auto;outline:none;
-  user-select:text;-webkit-user-select:text;white-space:pre-wrap;word-break:break-word;
-  color:#dbe6f2;font-size:14px;cursor:text}
-.face.back{display:none}
-.win.flipped .face.front{display:none}
-.win.flipped .face.back{display:block}
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #000;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+  }
+  #pano-canvas {
+    display: block;
+    width: 100%; height: 100%;
+    touch-action: none;
+  }
+
+  /* Окно, создаваемое по тапу */
+  .pano-window {
+    position: fixed;
+    width: 240px;
+    height: 160px;
+    box-sizing: border-box;
+    background: rgba(18, 18, 18, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+    z-index: 10;
+  }
 </style>
 </head>
 <body>
-<div id="world"></div>
-<div id="cross">
-  <svg width="24" height="24" viewBox="0 0 24 24">
-    <circle id="ring" cx="12" cy="12" r="10.5" fill="none" stroke="#7fd4ff" stroke-width="1.6"
-      stroke-linecap="round" stroke-dasharray="65.97" stroke-dashoffset="65.97"
-      opacity="0" transform="rotate(-90 12 12)"/>
-    <g stroke="#7fd4ff" stroke-width="1.4" stroke-linecap="round" opacity="0.85">
-      <line x1="12" y1="2.5" x2="12" y2="7.5"/>
-      <line x1="12" y1="16.5" x2="12" y2="21.5"/>
-      <line x1="2.5" y1="12" x2="7.5" y2="12"/>
-      <line x1="16.5" y1="12" x2="21.5" y2="12"/>
-    </g>
-    <circle cx="12" cy="12" r="1.1" fill="#7fd4ff" opacity="0.9"/>
-  </svg>
-</div>
+<canvas id="pano-canvas"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-(function(){
-'use strict';
+(function () {
+  'use strict';
 
-const worldEl = document.getElementById('world');
-const crossEl = document.getElementById('cross');
-const ringEl  = document.getElementById('ring');
-const MOBILE  = matchMedia('(hover: none) and (pointer: coarse)').matches;
+  if (typeof THREE === 'undefined') {
+    console.error('[pano] Three.js не загрузился');
+    return;
+  }
 
-// ---- constants
-const RING_LEN      = 65.97;
-const STILL_MS      = 1000;
-const BOTTOM_FRAC   = 0.15;
-const BOTTOM_DBL_MS = 300;
-const SENS_PX_PER_DEG = 15;    // px per degree of tilt
-const SENS_DEG_MAX  = 8;       // max degrees per frame — реальный предел для руки
-const SENS_PX_MAX   = 200;     // max px per frame from gyro (защита от накопления)
-const TAP_MOVE_PX   = 5;       // pixels of motion before it's a drag, not a tap
-const PAN_DECAY     = 0.92;    // inertia per frame
-const PAN_VEL_MULT  = 0.5;
-const PAN_VEL_MAX   = 2000;
+  /* ============================================================
+     Тестовая панорама (4 стороны, FRONT виден сразу)
+     ============================================================ */
+  function generateTestPano() {
+    const W = 2048, H = 1024;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
 
-// ---- state
-let camX = 0, camY = 0;
-let camVelX = 0, camVelY = 0;
-let wins = [];
-let idc  = 0;
-let db   = null;
-let drag = null;              // PC window move/resize drag
-let modeWin = null;
-let modeStillStart = 0;
-let modeUserMoved = false;
+    ctx.fillStyle = '#4CAF50'; ctx.fillRect(0,     0, W/4, H);
+    ctx.fillStyle = '#FFEB3B'; ctx.fillRect(W/4,   0, W/4, H);
+    ctx.fillStyle = '#FF5722'; ctx.fillRect(W/2,   0, W/4, H);
+    ctx.fillStyle = '#2196F3'; ctx.fillRect(3*W/4, 0, W/4, H);
 
-// pan drag (mouse & touch, KRPano-like)
-let panDrag = null;
-let lastBottomTap = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= 8; i++) {
+      ctx.beginPath(); ctx.moveTo(i*W/8, 0); ctx.lineTo(i*W/8, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i*H/8); ctx.lineTo(W, i*H/8); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
 
-// sensor
-let hasSensor = false;
-let sensorLastAlpha = null, sensorLastBeta = null;
-let sensDeltaX = 0, sensDeltaY = 0;
-let motionRequested = false;
-
-// mouse position (for crosshair on PC)
-const mouse = { sx: innerWidth/2, sy: innerHeight/2 };
-
-// ---- IndexedDB
-const dbReq = indexedDB.open('wins360', 1);
-dbReq.onupgradeneeded = e => {
-  const d = e.target.result;
-  if(!d.objectStoreNames.contains('w')) d.createObjectStore('w', { keyPath:'id' });
-};
-dbReq.onsuccess = e => {
-  db = e.target.result;
-  try {
-    const rq = db.transaction('w','readonly').objectStore('w').getAll();
-    rq.onsuccess = () => {
-      (rq.result || []).forEach(rec => {
-        const a = rec.a || [];
-        createWindow(a[0]||0, a[1]||0, {
-          id: rec.id, w: a[2], h: a[3], flip: !!a[4],
-          front: a[5]||'', back: a[6]||''
-        });
-      });
-    };
-  } catch(err){}
-};
-const saveTimers = {};
-function scheduleSave(o){
-  clearTimeout(saveTimers[o.id]);
-  saveTimers[o.id] = setTimeout(() => saveNow(o), 300);
-}
-function saveNow(o){
-  if(!db) return;
-  try {
-    db.transaction('w','readwrite').objectStore('w').put({
-      id: o.id,
-      a: [Math.round(o.x), Math.round(o.y), Math.round(o.w), Math.round(o.h),
-          o.flip?1:0, o.frontEl.innerHTML, o.backEl.innerHTML]
+    ctx.font = 'bold 140px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'black';
+    [
+      ['FRONT',  W/2,   H/2],
+      ['LEFT',   W/4,   H/2],
+      ['RIGHT',  3*W/4, H/2],
+      ['BACK',   0,     H/2],
+      ['BACK',   W,     H/2],
+      ['TOP',    W/2,   H*0.10],
+      ['BOTTOM', W/2,   H*0.90]
+    ].forEach(function (l) {
+      ctx.strokeText(l[0], l[1], l[2]);
+      ctx.fillStyle = 'white';
+      ctx.fillText(l[0], l[1], l[2]);
     });
-  } catch(err){}
-}
-function removeRec(id){
-  if(!db) return;
-  try { db.transaction('w','readwrite').objectStore('w').delete(id); } catch(err){}
-}
 
-// ---- icons
-const svg = s => '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round">'+s+'</svg>';
-const ICONS = {
-  flip:   svg('<polygon class="star" points="6,1 7.35,4.35 10.9,4.65 8.25,7.1 9.05,10.6 6,8.85 2.95,10.6 3.75,7.1 1.1,4.65 4.65,4.35"/>'),
-  edit:   svg('<circle cx="6" cy="6" r="4.2"/>'),
-  resize: svg('<polygon points="6,1.5 11,10.3 1,10.3"/>'),
-  move:   svg('<rect x="1.9" y="1.9" width="8.2" height="8.2" rx="1.1"/>'),
-  close:  svg('<path d="M2.7 2.7 L9.3 9.3 M9.3 2.7 L2.7 9.3" stroke-linecap="round"/>')
-};
+    return cv;
+  }
 
-// ---- window
-function createWindow(x, y, o){
-  o = o || {};
-  const id = (o.id != null) ? o.id : ++idc;
-  if(o.id != null) idc = Math.max(idc, o.id);
+  /* ============================================================
+     Three.js
+     ============================================================ */
+  const canvas = document.getElementById('pano-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
-  const el = document.createElement('div');
-  el.className = 'win' + (o.flip ? ' flipped' : '');
-  el.innerHTML =
-    '<div class="bar">' +
-      '<button class="btn" data-act="flip">'   + ICONS.flip   + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="edit">'   + ICONS.edit   + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="resize">' + ICONS.resize + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="move">'   + ICONS.move   + '<span class="r1"></span><span class="r2"></span></button>' +
-      '<button class="btn" data-act="close">'  + ICONS.close  + '<span class="r1"></span><span class="r2"></span></button>' +
-    '</div>' +
-    '<div class="body">' +
-      '<div class="face front" contenteditable="true" spellcheck="false"></div>' +
-      '<div class="face back" contenteditable="true" spellcheck="false"></div>' +
-    '</div>';
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1100);
 
-  const frontEl = el.querySelector('.front');
-  const backEl  = el.querySelector('.back');
-  if(o.front) frontEl.innerHTML = o.front;
-  if(o.back)  backEl.innerHTML  = o.back;
+  const tex = new THREE.CanvasTexture(generateTestPano());
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
 
-  const obj = {
-    id: id, x: x, y: y,
-    w: o.w || 260, h: o.h || 170,
-    flip: !!o.flip, mode: null,
-    el: el, frontEl: frontEl, backEl: backEl,
-    _w: 0, _h: 0,
-    offX: 0, offY: 0, anchorX: 0, anchorY: 0
-  };
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(500, 60, 40),
+    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
+  );
+  sphere.rotation.y = Math.PI / 2;   // FRONT прямо перед камерой
+  scene.add(sphere);
 
-  // PC: drag move/resize buttons directly
-  el.addEventListener('pointerdown', e => {
-    if(MOBILE) return;
-    if(e.button !== 0) return;
-    const b = e.target.closest ? e.target.closest('.btn') : null;
-    if(!b) return;
-    const a = b.dataset.act;
-    if(a === 'move' || a === 'resize'){
-      e.preventDefault(); e.stopPropagation();
-      startDrag(obj, a, e);
-    }
+  /* ============================================================
+     Resize
+     ============================================================ */
+  function resize() {
+    let w = canvas.clientWidth  || window.innerWidth;
+    let h = canvas.clientHeight || window.innerHeight;
+    if (w < 10) w = window.innerWidth;
+    if (h < 10) h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () {
+    setTimeout(resize, 250);
   });
 
-  // click (both PC and mobile) for close/flip/edit, and AOE-triggered clicks on mobile
-  el.addEventListener('click', e => {
-    const b = e.target.closest ? e.target.closest('.btn') : null;
-    if(!b) return;
-    const a = b.dataset.act;
-    if(!MOBILE && (a === 'move' || a === 'resize')) return;
-    e.stopPropagation();
-    act(obj, a);
+  /* ============================================================
+     Гироскоп — включается сразу, на iOS — по первому тапу
+     ============================================================ */
+  let gyroOn = false;
+  let requestInFlight = false;
+
+  const dev = { alpha: 0, beta: 0, gamma: 0 };
+  let screenOrient = window.orientation || 0;
+
+  window.addEventListener('deviceorientation', function (e) {
+    if (e.alpha == null && e.beta == null && e.gamma == null) return;
+    dev.alpha = e.alpha || 0;
+    dev.beta  = e.beta  || 0;
+    dev.gamma = e.gamma || 0;
+  });
+  window.addEventListener('orientationchange', function () {
+    screenOrient = window.orientation || 0;
   });
 
-  frontEl.addEventListener('input', () => scheduleSave(obj));
-  backEl.addEventListener('input',  () => scheduleSave(obj));
+  function tryEnableGyro() {
+    if (gyroOn || requestInFlight) return;
 
-  wins.push(obj);
-  worldEl.appendChild(el);
-  return obj;
-}
-
-function act(o, a){
-  if(a === 'close'){
-    if(o.mode) applyMode(o, null);
-    o.el.remove();
-    const i = wins.indexOf(o);
-    if(i >= 0) wins.splice(i, 1);
-    removeRec(o.id);
-  } else if(a === 'flip'){
-    o.flip = !o.flip;
-    o.el.classList.toggle('flipped', o.flip);
-    scheduleSave(o);
-  } else if(a === 'move'){
-    applyMode(o, o.mode === 'move' ? null : 'move');
-  } else if(a === 'resize'){
-    applyMode(o, o.mode === 'resize' ? null : 'resize');
-  } else if(a === 'edit'){
-    (o.flip ? o.backEl : o.frontEl).focus();
-  }
-}
-
-function applyMode(o, m){
-  if(o.mode === m) return;
-  if(modeWin && modeWin !== o) applyMode(modeWin, null);
-  o.mode = m;
-  o.el.classList.toggle('moving',   m === 'move');
-  o.el.classList.toggle('resizing', m === 'resize');
-  if(m){
-    modeWin = o;
-    if(m === 'move'){
-      o.offX = o.x - camX; o.offY = o.y - camY;
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      // iOS 13+ — нужен жест пользователя (это вызывает Safari)
+      requestInFlight = true;
+      DeviceOrientationEvent.requestPermission()
+        .then(function (p) {
+          requestInFlight = false;
+          if (p === 'granted') gyroOn = true;
+        })
+        .catch(function () {
+          requestInFlight = false;
+          // Safari отклонил без жеста — попробуем на следующем тапе
+        });
     } else {
-      o.anchorX = camX - o.w; o.anchorY = camY - o.h;
-    }
-    modeStillStart = performance.now();
-    modeUserMoved = false;
-    // Reset sensor baseline so post-mode tilt doesn't jump
-    sensorLastAlpha = null; sensorLastBeta = null;
-    sensDeltaX = 0; sensDeltaY = 0;
-  } else {
-    if(modeWin === o) modeWin = null;
-    scheduleSave(o);
-    sensorLastAlpha = null; sensorLastBeta = null;
-    sensDeltaX = 0; sensDeltaY = 0;
-  }
-  setRing(0, false);
-}
-
-// ---- PC window drag
-function startDrag(o, kind, e){
-  if(drag) endDrag();
-  if(modeWin) applyMode(modeWin, null);
-  drag = { o: o, kind: kind, sx: e.clientX, sy: e.clientY, x0: o.x, y0: o.y, w0: o.w, h0: o.h };
-  camVelX = 0; camVelY = 0;
-  o.el.classList.add(kind === 'move' ? 'moving' : 'resizing');
-}
-function endDrag(){
-  if(!drag) return;
-  const o = drag.o;
-  drag = null;
-  o.el.classList.remove('moving','resizing');
-  saveNow(o);
-}
-window.addEventListener('pointermove', e => {
-  if(!drag) return;
-  if(e.pointerType === 'mouse' && e.buttons === 0){ endDrag(); return; }
-  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
-  if(drag.kind === 'move'){
-    drag.o.x = drag.x0 + dx;
-    drag.o.y = drag.y0 + dy;
-  } else {
-    drag.o.w = Math.max(120, drag.w0 + dx);
-    drag.o.h = Math.max(80,  drag.h0 + dy);
-  }
-});
-window.addEventListener('pointerup', () => { if(drag) endDrag(); });
-window.addEventListener('pointercancel', () => { if(drag) endDrag(); });
-
-// ---- device orientation (smooth, delta-based)
-function onOrient(e){
-  if(e.alpha == null || e.beta == null) return;
-
-  if(sensorLastAlpha === null){
-    sensorLastAlpha = e.alpha;
-    sensorLastBeta  = e.beta;
-    hasSensor = true;
-    return;
-  }
-
-  let dA = e.alpha - sensorLastAlpha;
-  if(dA >  180) dA -= 360;
-  if(dA < -180) dA += 360;
-  const dB = e.beta - sensorLastBeta;
-
-  // Отсекаем глюки: реальный предел для руки ~8°/кадр.
-  // Всё выше — 180°-флип alpha, гимбал-лок у beta=±90°, сбой сенсора.
-  if(Math.abs(dA) < SENS_DEG_MAX) sensDeltaX -= dA * SENS_PX_PER_DEG;
-  if(Math.abs(dB) < SENS_DEG_MAX) sensDeltaY += dB * SENS_PX_PER_DEG;
-
-  // Real movement detection for mode timer
-  if(modeWin && (Math.abs(dA) > 0.3 || Math.abs(dB) > 0.3)){
-    modeUserMoved = true;
-  }
-
-  sensorLastAlpha = e.alpha;
-  sensorLastBeta  = e.beta;
-}
-
-function requestMotion(){
-  if(motionRequested) return;
-  motionRequested = true;
-  if(typeof DeviceOrientationEvent === 'undefined') return;
-  try {
-    if(typeof DeviceOrientationEvent.requestPermission === 'function'){
-      DeviceOrientationEvent.requestPermission().then(r => {
-        if(r === 'granted') window.addEventListener('deviceorientation', onOrient);
-      }).catch(()=>{});
-    } else {
-      window.addEventListener('deviceorientation', onOrient);
-    }
-  } catch(err){}
-}
-
-// ---- pan drag (mouse & touch)
-function startPanDrag(e){
-  if(e.target.closest && e.target.closest('.win')) return;
-  panDrag = {
-    id: e.pointerId,
-    lx: e.clientX, ly: e.clientY,
-    sx: e.clientX, sy: e.clientY,
-    vx: 0, vy: 0,
-    lastT: performance.now(),
-    totalMove: 0,
-    moved: false
-  };
-  camVelX = 0; camVelY = 0;
-}
-
-function movePanDrag(e){
-  if(!panDrag || e.pointerId !== panDrag.id) return;
-  if(e.pointerType === 'mouse' && e.buttons === 0){ endPanDrag(e); return; }
-  e.preventDefault();
-
-  const dx = e.clientX - panDrag.lx;
-  const dy = e.clientY - panDrag.ly;
-  const now = performance.now();
-  const dt = (now - panDrag.lastT) / 1000;
-
-  if(dt > 0.001){
-    panDrag.vx = dx / dt;
-    panDrag.vy = dy / dt;
-    panDrag.lastT = now;
-  }
-
-  camX -= dx;
-  camY -= dy;
-
-  panDrag.totalMove += Math.abs(dx) + Math.abs(dy);
-  if(panDrag.totalMove > TAP_MOVE_PX) panDrag.moved = true;
-
-  panDrag.lx = e.clientX;
-  panDrag.ly = e.clientY;
-
-  if(modeWin) modeUserMoved = true;
-}
-
-function endPanDrag(e){
-  if(!panDrag || e.pointerId !== panDrag.id) return;
-  const p = panDrag;
-  panDrag = null;
-
-  if(p.moved){
-    // inertia
-    camVelX = -p.vx * PAN_VEL_MULT;
-    camVelY = -p.vy * PAN_VEL_MULT;
-    const sp = Math.hypot(camVelX, camVelY);
-    if(sp > PAN_VEL_MAX){
-      camVelX *= PAN_VEL_MAX / sp;
-      camVelY *= PAN_VEL_MAX / sp;
-    }
-    // reset sensor baseline so post-drag tilt doesn't jump
-    if(MOBILE){ sensorLastAlpha = null; sensorLastBeta = null; sensDeltaX = 0; sensDeltaY = 0; }
-  } else {
-    // it was a tap
-    const isBottom = e.clientY > innerHeight * (1 - BOTTOM_FRAC);
-    if(isBottom){
-      const now = performance.now();
-      if(now - lastBottomTap < BOTTOM_DBL_MS){
-        resetAll();
-        lastBottomTap = 0;
-      } else {
-        lastBottomTap = now;
-      }
-    } else {
-      if(MOBILE){
-        createWindow(camX - 130, camY - 85);
-      } else {
-        createWindow(e.clientX - innerWidth/2 + camX - 130,
-                     e.clientY - innerHeight/2 + camY - 85);
-      }
+      // Android / desktop — включается сразу
+      gyroOn = true;
     }
   }
-}
 
-function resetAll(){
-  camX = 0; camY = 0;
-  camVelX = 0; camVelY = 0;
-  sensorLastAlpha = null; sensorLastBeta = null;
-  sensDeltaX = 0; sensDeltaY = 0;
-}
+  // 1) сразу на загрузке
+  tryEnableGyro();
 
-worldEl.addEventListener('pointerdown', e => {
-  if(e.target.closest && e.target.closest('.win')) return;
-  startPanDrag(e);
-  if(MOBILE) requestMotion();
-});
-worldEl.addEventListener('pointermove', movePanDrag, { passive: false });
-worldEl.addEventListener('pointerup', endPanDrag);
-worldEl.addEventListener('pointercancel', endPanDrag);
+  // 2) на любой тап / клик (нужно только для iOS)
+  document.addEventListener('touchstart', tryEnableGyro, { passive: true });
+  document.addEventListener('click',      tryEnableGyro);
 
-window.addEventListener('mousemove', e => {
-  mouse.sx = e.clientX;
-  mouse.sy = e.clientY;
-});
+  /* ============================================================
+     Применение гироскопа к камере
+     ============================================================ */
+  const DEG    = Math.PI / 180;
+  const zee    = new THREE.Vector3(0, 0, 1);
+  const _euler = new THREE.Euler();
+  const q0     = new THREE.Quaternion();
+  const q1     = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 
-// ---- AOE charge (mobile only)
-let chargeBtn = null, chargeStart = 0, firedBtn = null;
+  function applyGyro() {
+    const a = dev.alpha * DEG;
+    const b = dev.beta  * DEG;
+    const g = dev.gamma * DEG;
+    const o = screenOrient * DEG;
 
-function setCharge(btn, p, on){
-  if(!btn) return;
-  btn.classList.toggle('charge', !!on);
-  const r2 = btn.querySelector('.r2');
-  if(r2) r2.style.transform = 'translate(-50%,-50%) scale(' + (on ? Math.max(0.06, p) : 0) + ')';
-}
-function setRing(p, on){
-  ringEl.style.opacity = on ? '1' : '0';
-  ringEl.style.strokeDashoffset = String(RING_LEN * (1 - Math.min(1, p)));
-}
-function findButtonAtCenter(){
-  const cx = innerWidth/2, cy = innerHeight/2;
-  const offs = [0, -3, 3];
-  for(const dx of offs){
-    for(const dy of offs){
-      const el = document.elementFromPoint(cx + dx, cy + dy);
-      const btn = el && el.closest ? el.closest('.btn') : null;
-      if(btn) return btn;
-    }
-  }
-  return null;
-}
-function updateCharge(t){
-  if(modeWin || drag || panDrag){
-    if(chargeBtn) setCharge(chargeBtn, 0, false);
-    chargeBtn = null;
-    return;
-  }
-  const btn = findButtonAtCenter();
-
-  if(btn !== chargeBtn){
-    if(chargeBtn) setCharge(chargeBtn, 0, false);
-    chargeBtn = btn;
-    chargeStart = t;
-    firedBtn = null;
-    if(chargeBtn) setCharge(chargeBtn, 0, true);
+    _euler.set(b, a, -g, 'YXZ');
+    camera.quaternion.setFromEuler(_euler);
+    camera.quaternion.multiply(q1);
+    camera.quaternion.multiply(q0.setFromAxisAngle(zee, -o));
   }
 
-  if(!chargeBtn || chargeBtn === firedBtn) return;
+  /* ============================================================
+     Окно по тапу на панораме
+     ============================================================ */
+  const WIN_W = 240, WIN_H = 160;
+  let panoWindow = null;
 
-  const p = (t - chargeStart) / STILL_MS;
-  if(p >= 1){
-    firedBtn = chargeBtn;
-    setCharge(chargeBtn, 0, false);
-    chargeBtn.click();
-  } else {
-    setCharge(chargeBtn, p, true);
-  }
-}
+  canvas.addEventListener('click', function (e) {
+    if (panoWindow) return;   // окно уже создано
 
-// ---- frame
-let lastT = 0;
-function frame(t){
-  if(!lastT) lastT = t;
-  const dt = Math.min(0.05, (t - lastT) / 1000);
-  lastT = t;
+    const x = Math.max(8, Math.min(e.clientX - WIN_W / 2, window.innerWidth  - WIN_W - 8));
+    const y = Math.max(8, Math.min(e.clientY - WIN_H / 2, window.innerHeight - WIN_H - 8));
 
-  // Camera inertia
-  if(!panDrag && !drag){
-    camX += camVelX * dt;
-    camY += camVelY * dt;
-    camVelX *= PAN_DECAY;
-    camVelY *= PAN_DECAY;
-    if(Math.abs(camVelX) < 1) camVelX = 0;
-    if(Math.abs(camVelY) < 1) camVelY = 0;
-  }
+    panoWindow = document.createElement('div');
+    panoWindow.className = 'pano-window';
+    panoWindow.style.left = x + 'px';
+    panoWindow.style.top  = y + 'px';
+    document.body.appendChild(panoWindow);
+  });
 
-  // Sensor deltas → camera
-  if(MOBILE && hasSensor && !panDrag && !drag){
-    // страховка от накопления (если между кадрами прилетело много событий)
-    if(sensDeltaX >  SENS_PX_MAX) sensDeltaX =  SENS_PX_MAX;
-    if(sensDeltaX < -SENS_PX_MAX) sensDeltaX = -SENS_PX_MAX;
-    if(sensDeltaY >  SENS_PX_MAX) sensDeltaY =  SENS_PX_MAX;
-    if(sensDeltaY < -SENS_PX_MAX) sensDeltaY = -SENS_PX_MAX;
-
-    camX += sensDeltaX;
-    camY += sensDeltaY;
-    sensDeltaX = 0;
-    sensDeltaY = 0;
-  } else if(sensDeltaX || sensDeltaY){
-    sensDeltaX = 0; sensDeltaY = 0;
+  /* ============================================================
+     Рендер
+     ============================================================ */
+  function render() {
+    requestAnimationFrame(render);
+    if (gyroOn) applyGyro();
+    renderer.render(scene, camera);
   }
 
-  // Crosshair
-  if(MOBILE){
-    crossEl.style.transform = 'translate(' + (innerWidth/2 - 12) + 'px,' + (innerHeight/2 - 12) + 'px)';
-  } else {
-    crossEl.style.transform = 'translate(' + (mouse.sx - 12) + 'px,' + (mouse.sy - 12) + 'px)';
-  }
-
-  // Mode logic
-  if(modeWin){
-    if(modeWin.mode === 'move'){
-      modeWin.x = camX + modeWin.offX;
-      modeWin.y = camY + modeWin.offY;
-    } else if(modeWin.mode === 'resize'){
-      modeWin.x = modeWin.anchorX;
-      modeWin.y = modeWin.anchorY;
-      modeWin.w = Math.max(120, camX - modeWin.anchorX);
-      modeWin.h = Math.max(80,  camY - modeWin.anchorY);
-    }
-    if(modeUserMoved){
-      modeStillStart = t;
-      modeUserMoved = false;
-    }
-    const p = (t - modeStillStart) / STILL_MS;
-    if(p >= 1){
-      applyMode(modeWin, null);
-    } else {
-      setRing(p, true);
-    }
-  } else {
-    setRing(0, false);
-  }
-
-  // Layout windows
-  const hw = innerWidth/2, hh = innerHeight/2;
-  for(let i = 0; i < wins.length; i++){
-    const o = wins[i];
-    if(o._w !== o.w){ o.el.style.width  = o.w + 'px'; o._w = o.w; }
-    if(o._h !== o.h){ o.el.style.height = o.h + 'px'; o._h = o.h; }
-    o.el.style.transform = 'translate(' + Math.round(o.x - camX + hw) + 'px,' +
-                                          Math.round(o.y - camY + hh) + 'px)';
-  }
-
-  if(MOBILE) updateCharge(t);
-
-  requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
-
+  /* ============================================================
+     Старт
+     ============================================================ */
+  resize();
+  setTimeout(resize, 50);
+  setTimeout(resize, 200);
+  setTimeout(resize, 800);
+  render();
 })();
 </script>
 </body>
