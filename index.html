@@ -68,18 +68,16 @@ const crossEl = document.getElementById('cross');
 const ringEl  = document.getElementById('ring');
 const MOBILE  = matchMedia('(hover: none) and (pointer: coarse)').matches;
 
-// ---- constants (KRPano-like drag feel)
-const MAX_TILT_DEG = 24;
-const DEAD_ZONE    = 0.18;
-const DRAG_FRICTION = 0.92;      // per frame velocity decay while dragging
-const INERTIA_FRICTION = 0.94;   // after release
-const DRAG_SCALE   = 1.0;        // 1:1 pixel-to-pixel
-const SENSOR_FILTER= 0.16;
-const CALIB_SAMPLES= 25;
-const RING_LEN     = 65.97;
-const STILL_MS     = 1000;
-const BOTTOM_FRAC  = 0.15;
-const BOTTOM_DBL_MS= 300;
+// ---- constants
+const RING_LEN      = 65.97;
+const STILL_MS      = 1000;
+const BOTTOM_FRAC   = 0.15;
+const BOTTOM_DBL_MS = 300;
+const SENS_PX_PER_DEG = 15;    // px per degree of tilt
+const TAP_MOVE_PX   = 5;       // pixels of motion before it's a drag, not a tap
+const PAN_DECAY     = 0.92;    // inertia per frame
+const PAN_VEL_MULT  = 0.5;
+const PAN_VEL_MAX   = 2000;
 
 // ---- state
 let camX = 0, camY = 0;
@@ -87,181 +85,67 @@ let camVelX = 0, camVelY = 0;
 let wins = [];
 let idc  = 0;
 let db   = null;
-let drag = null;               // window move/resize drag
+let drag = null;              // PC window move/resize drag
 let modeWin = null;
 let modeStillStart = 0;
-let modeStillCamX = 0;
-let modeStillCamY = 0;
+let modeUserMoved = false;
 
-// pan drag (KRPano style)
+// pan drag (mouse & touch, KRPano-like)
 let panDrag = null;
+let lastBottomTap = 0;
 
 // sensor
-const sensorState = { motionEnabled:false, hasAccel:false, baseSet:false, samples:[],
-  accel:{x:0,y:0,z:0}, baseMatrix:null, baseTargetZ:1 };
+let hasSensor = false;
+let sensorLastAlpha = null, sensorLastBeta = null;
+let sensDeltaX = 0, sensDeltaY = 0;
+let motionRequested = false;
 
-// mouse (for PC crosshair + joystick fallback)
-const mouse = { x:0, y:0, sx:0, sy:0, active:false };
-
-// ---- math helpers
-const clamp  = (v,a,b)=>Math.max(a,Math.min(b,v));
-const norm3  = v=>{const l=Math.hypot(v.x,v.y,v.z); return l<1e-9?null:{x:v.x/l,y:v.y/l,z:v.z/l};};
-const dot3   = (a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
-const cross3 = (a,b)=>({x:a.y*b.z-a.z*b.y, y:a.z*b.x-a.x*b.z, z:a.x*b.y-a.y*b.x});
-const identM3= ()=>[1,0,0, 0,1,0, 0,0,1];
-function axisAngleM3(ax,ang){
-  const x=ax.x,y=ax.y,z=ax.z,c=Math.cos(ang),s=Math.sin(ang),t=1-c;
-  return [t*x*x+c, t*x*y-s*z, t*x*z+s*y,
-          t*x*y+s*z, t*y*y+c, t*y*z-s*x,
-          t*x*z-s*y, t*y*z+s*x, t*z*z+c];
-}
-function matFromTo(f,t){
-  const a=norm3(f), b=norm3(t);
-  if(!a||!b) return identM3();
-  const d=clamp(dot3(a,b),-1,1);
-  if(d>0.99999) return identM3();
-  if(d<-0.99999) return axisAngleM3({x:1,y:0,z:0},Math.PI);
-  const ax=norm3(cross3(a,b));
-  return ax?axisAngleM3(ax,Math.acos(d)):identM3();
-}
-function applyM3(m,v){
-  return { x:m[0]*v.x+m[1]*v.y+m[2]*v.z,
-           y:m[3]*v.x+m[4]*v.y+m[5]*v.z,
-           z:m[6]*v.x+m[7]*v.y+m[8]*v.z };
-}
-
-// ---- sensor
-function onMotion(ev){
-  if(!sensorState.motionEnabled) return;
-  const g=ev.accelerationIncludingGravity;
-  if(!g||!isFinite(g.x)||!isFinite(g.y)||!isFinite(g.z)) return;
-  if(!sensorState.hasAccel){
-    sensorState.accel={x:g.x,y:g.y,z:g.z};
-    sensorState.hasAccel=true;
-  } else {
-    sensorState.accel.x+=(g.x-sensorState.accel.x)*SENSOR_FILTER;
-    sensorState.accel.y+=(g.y-sensorState.accel.y)*SENSOR_FILTER;
-    sensorState.accel.z+=(g.z-sensorState.accel.z)*SENSOR_FILTER;
-  }
-  if(!sensorState.baseSet){
-    sensorState.samples.push({x:sensorState.accel.x,y:sensorState.accel.y,z:sensorState.accel.z});
-    if(sensorState.samples.length>=CALIB_SAMPLES){
-      let sx=0,sy=0,sz=0;
-      for(const s of sensorState.samples){sx+=s.x;sy+=s.y;sz+=s.z;}
-      const n=sensorState.samples.length;
-      const av=norm3({x:sx/n,y:sy/n,z:sz/n});
-      if(av){
-        const tz=av.z>=0?1:-1;
-        sensorState.baseTargetZ=tz;
-        sensorState.baseMatrix=matFromTo(av,{x:0,y:0,z:tz});
-        sensorState.baseSet=true;
-      }
-      sensorState.samples=[];
-    }
-  }
-}
-function sensorTilt(){
-  if(!sensorState.hasAccel||!sensorState.baseSet||!sensorState.baseMatrix) return null;
-  const c=norm3(sensorState.accel); if(!c) return null;
-  const v=applyM3(sensorState.baseMatrix,c);
-  const sx=clamp(-v.x*sensorState.baseTargetZ,-1,1);
-  const sy=clamp( v.y*sensorState.baseTargetZ,-1,1);
-  return { tx:Math.asin(sx)*180/Math.PI, ty:Math.asin(sy)*180/Math.PI };
-}
-function recalibrateTilt(){
-  if(!sensorState.hasAccel) return;
-  const c=norm3(sensorState.accel); if(!c) return;
-  const tz=c.z>=0?1:-1;
-  sensorState.baseTargetZ=tz;
-  sensorState.baseMatrix=matFromTo(c,{x:0,y:0,z:tz});
-  sensorState.baseSet=true;
-  camVelX=0; camVelY=0;
-}
-async function requestMotion(){
-  if(typeof DeviceMotionEvent==='undefined') return;
-  try{
-    if(typeof DeviceMotionEvent.requestPermission==='function'){
-      const r=await DeviceMotionEvent.requestPermission();
-      if(r!=='granted') return;
-    }
-    sensorState.motionEnabled=true;
-    window.addEventListener('devicemotion',onMotion);
-  }catch(e){}
-}
-
-// ---- tilt input (normalized -1..1)
-function currentTilt(){
-  if(sensorState.motionEnabled&&sensorState.baseSet){
-    const s=sensorTilt();
-    if(s){
-      const deadDeg=MAX_TILT_DEG*DEAD_ZONE;
-      const mag=Math.hypot(s.tx,s.ty);
-      if(mag<deadDeg) return {tx:0,ty:0};
-      let tx=s.tx/MAX_TILT_DEG, ty=s.ty/MAX_TILT_DEG;
-      const m=Math.hypot(tx,ty);
-      if(m>1){tx/=m;ty/=m;}
-      return {tx,ty};
-    }
-  }
-  // mouse joystick fallback (PC when not dragging)
-  let mx=mouse.active?mouse.x:0;
-  let my=mouse.active?mouse.y:0;
-  const mag=Math.hypot(mx,my);
-  if(mag<DEAD_ZONE) return {tx:0,ty:0};
-  if(mag>1){mx/=mag;my/=mag;}
-  return {tx:mx,ty:my};
-}
-
-window.addEventListener('mousemove',e=>{
-  mouse.sx=e.clientX; mouse.sy=e.clientY;
-  mouse.x=(e.clientX/window.innerWidth -0.5)*2;
-  mouse.y=(e.clientY/window.innerHeight-0.5)*2;
-  mouse.active=true;
-});
+// mouse position (for crosshair on PC)
+const mouse = { sx: innerWidth/2, sy: innerHeight/2 };
 
 // ---- IndexedDB
-const dbReq=indexedDB.open('wins360',1);
-dbReq.onupgradeneeded=e=>{
-  const d=e.target.result;
-  if(!d.objectStoreNames.contains('w')) d.createObjectStore('w',{keyPath:'id'});
+const dbReq = indexedDB.open('wins360', 1);
+dbReq.onupgradeneeded = e => {
+  const d = e.target.result;
+  if(!d.objectStoreNames.contains('w')) d.createObjectStore('w', { keyPath:'id' });
 };
-dbReq.onsuccess=e=>{
-  db=e.target.result;
-  try{
-    const rq=db.transaction('w','readonly').objectStore('w').getAll();
-    rq.onsuccess=()=>{
-      (rq.result||[]).forEach(rec=>{
-        const a=rec.a||[];
+dbReq.onsuccess = e => {
+  db = e.target.result;
+  try {
+    const rq = db.transaction('w','readonly').objectStore('w').getAll();
+    rq.onsuccess = () => {
+      (rq.result || []).forEach(rec => {
+        const a = rec.a || [];
         createWindow(a[0]||0, a[1]||0, {
           id: rec.id, w: a[2], h: a[3], flip: !!a[4],
           front: a[5]||'', back: a[6]||''
         });
       });
     };
-  }catch(err){}
+  } catch(err){}
 };
-const saveTimers={};
+const saveTimers = {};
 function scheduleSave(o){
   clearTimeout(saveTimers[o.id]);
-  saveTimers[o.id]=setTimeout(()=>saveNow(o),300);
+  saveTimers[o.id] = setTimeout(() => saveNow(o), 300);
 }
 function saveNow(o){
   if(!db) return;
-  try{
+  try {
     db.transaction('w','readwrite').objectStore('w').put({
-      id:o.id,
-      a:[Math.round(o.x),Math.round(o.y),Math.round(o.w),Math.round(o.h),
-         o.flip?1:0, o.frontEl.innerHTML, o.backEl.innerHTML]
+      id: o.id,
+      a: [Math.round(o.x), Math.round(o.y), Math.round(o.w), Math.round(o.h),
+          o.flip?1:0, o.frontEl.innerHTML, o.backEl.innerHTML]
     });
-  }catch(err){}
+  } catch(err){}
 }
 function removeRec(id){
   if(!db) return;
-  try{db.transaction('w','readwrite').objectStore('w').delete(id);}catch(err){}
+  try { db.transaction('w','readwrite').objectStore('w').delete(id); } catch(err){}
 }
 
 // ---- icons
-const svg = s=>'<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round">'+s+'</svg>';
+const svg = s => '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round">'+s+'</svg>';
 const ICONS = {
   flip:   svg('<polygon class="star" points="6,1 7.35,4.35 10.9,4.65 8.25,7.1 9.05,10.6 6,8.85 2.95,10.6 3.75,7.1 1.1,4.65 4.65,4.35"/>'),
   edit:   svg('<circle cx="6" cy="6" r="4.2"/>'),
@@ -271,325 +155,414 @@ const ICONS = {
 };
 
 // ---- window
-function createWindow(x,y,o){
-  o=o||{};
-  const id=(o.id!=null)?o.id:++idc;
-  if(o.id!=null) idc=Math.max(idc,o.id);
+function createWindow(x, y, o){
+  o = o || {};
+  const id = (o.id != null) ? o.id : ++idc;
+  if(o.id != null) idc = Math.max(idc, o.id);
 
-  const el=document.createElement('div');
-  el.className='win'+(o.flip?' flipped':'');
+  const el = document.createElement('div');
+  el.className = 'win' + (o.flip ? ' flipped' : '');
   el.innerHTML =
-    '<div class="bar">'+
-      '<button class="btn" data-act="flip">'   +ICONS.flip  +'<span class="r1"></span><span class="r2"></span></button>'+
-      '<button class="btn" data-act="edit">'   +ICONS.edit  +'<span class="r1"></span><span class="r2"></span></button>'+
-      '<button class="btn" data-act="resize">' +ICONS.resize+'<span class="r1"></span><span class="r2"></span></button>'+
-      '<button class="btn" data-act="move">'   +ICONS.move  +'<span class="r1"></span><span class="r2"></span></button>'+
-      '<button class="btn" data-act="close">'  +ICONS.close +'<span class="r1"></span><span class="r2"></span></button>'+
-    '</div>'+
-    '<div class="body">'+
-      '<div class="face front" contenteditable="true" spellcheck="false"></div>'+
-      '<div class="face back" contenteditable="true" spellcheck="false"></div>'+
+    '<div class="bar">' +
+      '<button class="btn" data-act="flip">'   + ICONS.flip   + '<span class="r1"></span><span class="r2"></span></button>' +
+      '<button class="btn" data-act="edit">'   + ICONS.edit   + '<span class="r1"></span><span class="r2"></span></button>' +
+      '<button class="btn" data-act="resize">' + ICONS.resize + '<span class="r1"></span><span class="r2"></span></button>' +
+      '<button class="btn" data-act="move">'   + ICONS.move   + '<span class="r1"></span><span class="r2"></span></button>' +
+      '<button class="btn" data-act="close">'  + ICONS.close  + '<span class="r1"></span><span class="r2"></span></button>' +
+    '</div>' +
+    '<div class="body">' +
+      '<div class="face front" contenteditable="true" spellcheck="false"></div>' +
+      '<div class="face back" contenteditable="true" spellcheck="false"></div>' +
     '</div>';
 
-  const frontEl=el.querySelector('.front');
-  const backEl =el.querySelector('.back');
-  if(o.front) frontEl.innerHTML=o.front;
-  if(o.back)  backEl.innerHTML =o.back;
+  const frontEl = el.querySelector('.front');
+  const backEl  = el.querySelector('.back');
+  if(o.front) frontEl.innerHTML = o.front;
+  if(o.back)  backEl.innerHTML  = o.back;
 
-  const obj={
-    id:id, x:x, y:y,
-    w:o.w||260, h:o.h||170,
-    flip:!!o.flip, mode:null,
-    el:el, frontEl:frontEl, backEl:backEl,
-    _w:0, _h:0,
-    offX:0, offY:0, anchorX:0, anchorY:0
+  const obj = {
+    id: id, x: x, y: y,
+    w: o.w || 260, h: o.h || 170,
+    flip: !!o.flip, mode: null,
+    el: el, frontEl: frontEl, backEl: backEl,
+    _w: 0, _h: 0,
+    offX: 0, offY: 0, anchorX: 0, anchorY: 0
   };
 
-  // buttons — PC drag for move/resize
-  el.addEventListener('pointerdown', e=>{
-    if(e.pointerType!=='mouse'||e.button!==0) return;
-    const b=e.target.closest?e.target.closest('.btn'):null;
+  // PC: drag move/resize buttons directly
+  el.addEventListener('pointerdown', e => {
+    if(MOBILE) return;
+    if(e.button !== 0) return;
+    const b = e.target.closest ? e.target.closest('.btn') : null;
     if(!b) return;
-    const a=b.dataset.act;
-    if(a==='move'||a==='resize'){
+    const a = b.dataset.act;
+    if(a === 'move' || a === 'resize'){
       e.preventDefault(); e.stopPropagation();
-      startDrag(obj,a,e);
+      startDrag(obj, a, e);
     }
   });
-  el.addEventListener('click', e=>{
-    const b=e.target.closest?e.target.closest('.btn'):null;
+
+  // click (both PC and mobile) for close/flip/edit, and AOE-triggered clicks on mobile
+  el.addEventListener('click', e => {
+    const b = e.target.closest ? e.target.closest('.btn') : null;
     if(!b) return;
-    const a=b.dataset.act;
-    if(!MOBILE && (a==='move'||a==='resize')) return; // PC drag handles these
+    const a = b.dataset.act;
+    if(!MOBILE && (a === 'move' || a === 'resize')) return;
     e.stopPropagation();
-    act(obj,a);
+    act(obj, a);
   });
 
-  frontEl.addEventListener('input',()=>scheduleSave(obj));
-  backEl.addEventListener('input', ()=>scheduleSave(obj));
+  frontEl.addEventListener('input', () => scheduleSave(obj));
+  backEl.addEventListener('input',  () => scheduleSave(obj));
 
   wins.push(obj);
   worldEl.appendChild(el);
   return obj;
 }
 
-function act(o,a){
-  if(a==='close'){
-    if(o.mode) applyMode(o,null);
+function act(o, a){
+  if(a === 'close'){
+    if(o.mode) applyMode(o, null);
     o.el.remove();
-    const i=wins.indexOf(o);
-    if(i>=0) wins.splice(i,1);
+    const i = wins.indexOf(o);
+    if(i >= 0) wins.splice(i, 1);
     removeRec(o.id);
-  } else if(a==='flip'){
-    o.flip=!o.flip;
-    o.el.classList.toggle('flipped',o.flip);
+  } else if(a === 'flip'){
+    o.flip = !o.flip;
+    o.el.classList.toggle('flipped', o.flip);
     scheduleSave(o);
-  } else if(a==='move'){
-    applyMode(o, o.mode==='move'?null:'move');
-  } else if(a==='resize'){
-    applyMode(o, o.mode==='resize'?null:'resize');
-  } else if(a==='edit'){
-    (o.flip?o.backEl:o.frontEl).focus();
+  } else if(a === 'move'){
+    applyMode(o, o.mode === 'move' ? null : 'move');
+  } else if(a === 'resize'){
+    applyMode(o, o.mode === 'resize' ? null : 'resize');
+  } else if(a === 'edit'){
+    (o.flip ? o.backEl : o.frontEl).focus();
   }
 }
 
-function applyMode(o,m){
-  if(o.mode===m) return;
-  if(modeWin&&modeWin!==o) applyMode(modeWin,null);
-  o.mode=m;
-  o.el.classList.toggle('moving',  m==='move');
-  o.el.classList.toggle('resizing',m==='resize');
+function applyMode(o, m){
+  if(o.mode === m) return;
+  if(modeWin && modeWin !== o) applyMode(modeWin, null);
+  o.mode = m;
+  o.el.classList.toggle('moving',   m === 'move');
+  o.el.classList.toggle('resizing', m === 'resize');
   if(m){
-    modeWin=o;
-    if(m==='move'){
-      o.offX=o.x-camX; o.offY=o.y-camY;
+    modeWin = o;
+    if(m === 'move'){
+      o.offX = o.x - camX; o.offY = o.y - camY;
     } else {
-      o.anchorX=camX-o.w; o.anchorY=camY-o.h;
+      o.anchorX = camX - o.w; o.anchorY = camY - o.h;
     }
-    modeStillStart=performance.now();
-    modeStillCamX=camX; modeStillCamY=camY;
+    modeStillStart = performance.now();
+    modeUserMoved = false;
+    // Reset sensor baseline so post-mode tilt doesn't jump
+    sensorLastAlpha = null; sensorLastBeta = null;
+    sensDeltaX = 0; sensDeltaY = 0;
   } else {
-    if(modeWin===o) modeWin=null;
+    if(modeWin === o) modeWin = null;
     scheduleSave(o);
+    sensorLastAlpha = null; sensorLastBeta = null;
+    sensDeltaX = 0; sensDeltaY = 0;
   }
-  setRing(0,false);
+  setRing(0, false);
 }
 
-// ---- PC window move/resize drag
-function startDrag(o,kind,e){
+// ---- PC window drag
+function startDrag(o, kind, e){
   if(drag) endDrag();
-  if(modeWin) applyMode(modeWin,null);
-  drag={o:o,kind:kind,sx:e.clientX,sy:e.clientY,x0:o.x,y0:o.y,w0:o.w,h0:o.h};
-  camVelX=0; camVelY=0;
-  o.el.classList.add(kind==='move'?'moving':'resizing');
+  if(modeWin) applyMode(modeWin, null);
+  drag = { o: o, kind: kind, sx: e.clientX, sy: e.clientY, x0: o.x, y0: o.y, w0: o.w, h0: o.h };
+  camVelX = 0; camVelY = 0;
+  o.el.classList.add(kind === 'move' ? 'moving' : 'resizing');
 }
 function endDrag(){
   if(!drag) return;
-  const o=drag.o;
-  drag=null;
+  const o = drag.o;
+  drag = null;
   o.el.classList.remove('moving','resizing');
   saveNow(o);
 }
-window.addEventListener('pointermove',e=>{
+window.addEventListener('pointermove', e => {
   if(!drag) return;
-  if(e.pointerType==='mouse'&&e.buttons===0){endDrag(); return;}
-  const dx=e.clientX-drag.sx, dy=e.clientY-drag.sy;
-  if(drag.kind==='move'){
-    drag.o.x=drag.x0+dx;
-    drag.o.y=drag.y0+dy;
+  if(e.pointerType === 'mouse' && e.buttons === 0){ endDrag(); return; }
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if(drag.kind === 'move'){
+    drag.o.x = drag.x0 + dx;
+    drag.o.y = drag.y0 + dy;
   } else {
-    drag.o.w=Math.max(120,drag.w0+dx);
-    drag.o.h=Math.max(80, drag.h0+dy);
+    drag.o.w = Math.max(120, drag.w0 + dx);
+    drag.o.h = Math.max(80,  drag.h0 + dy);
   }
 });
-window.addEventListener('pointerup',()=>{ if(drag) endDrag(); });
-window.addEventListener('pointercancel',()=>{ if(drag) endDrag(); });
+window.addEventListener('pointerup', () => { if(drag) endDrag(); });
+window.addEventListener('pointercancel', () => { if(drag) endDrag(); });
 
-// ---- KRPano-style pan drag (mouse & touch)
-function startPanDrag(e){
-  if(e.target.closest&&e.target.closest('.win')) return;
-  panDrag={
-    id:e.pointerId,
-    lx:e.clientX, ly:e.clientY,
-    vx:0, vy:0,
-    lastT:performance.now(),
-    moved:false
-  };
-  camVelX=0; camVelY=0;
+// ---- device orientation (smooth, delta-based)
+function onOrient(e){
+  if(e.alpha == null || e.beta == null) return;
+  hasSensor = true;
+
+  if(sensorLastAlpha === null){
+    sensorLastAlpha = e.alpha;
+    sensorLastBeta = e.beta;
+    return;
+  }
+
+  let dA = e.alpha - sensorLastAlpha;
+  if(dA > 180) dA -= 360;
+  if(dA < -180) dA += 360;
+  const dB = e.beta - sensorLastBeta;
+
+  // Filter out huge jumps (gimbal-lock artifacts near vertical)
+  if(Math.abs(dA) < 30) sensDeltaX -= dA * SENS_PX_PER_DEG;
+  if(Math.abs(dB) < 30) sensDeltaY += dB * SENS_PX_PER_DEG;
+
+  // Real movement detection for mode timer
+  if(modeWin && (Math.abs(dA) > 0.3 || Math.abs(dB) > 0.3)){
+    modeUserMoved = true;
+  }
+
+  sensorLastAlpha = e.alpha;
+  sensorLastBeta = e.beta;
 }
+
+function requestMotion(){
+  if(motionRequested) return;
+  motionRequested = true;
+  if(typeof DeviceOrientationEvent === 'undefined') return;
+  try {
+    if(typeof DeviceOrientationEvent.requestPermission === 'function'){
+      DeviceOrientationEvent.requestPermission().then(r => {
+        if(r === 'granted') window.addEventListener('deviceorientation', onOrient);
+      }).catch(()=>{});
+    } else {
+      window.addEventListener('deviceorientation', onOrient);
+    }
+  } catch(err){}
+}
+
+// ---- pan drag (mouse & touch)
+function startPanDrag(e){
+  if(e.target.closest && e.target.closest('.win')) return;
+  panDrag = {
+    id: e.pointerId,
+    lx: e.clientX, ly: e.clientY,
+    sx: e.clientX, sy: e.clientY,
+    vx: 0, vy: 0,
+    lastT: performance.now(),
+    totalMove: 0,
+    moved: false
+  };
+  camVelX = 0; camVelY = 0;
+}
+
 function movePanDrag(e){
-  if(!panDrag||e.pointerId!==panDrag.id) return;
-  if(e.pointerType==='mouse'&&e.buttons===0){ endPanDrag(e); return; }
+  if(!panDrag || e.pointerId !== panDrag.id) return;
+  if(e.pointerType === 'mouse' && e.buttons === 0){ endPanDrag(e); return; }
   e.preventDefault();
 
-  const now=performance.now();
-  const dt=Math.max(1,(now-panDrag.lastT))/1000;
-  const dx=e.clientX-panDrag.lx;
-  const dy=e.clientY-panDrag.ly;
+  const dx = e.clientX - panDrag.lx;
+  const dy = e.clientY - panDrag.ly;
+  const now = performance.now();
+  const dt = (now - panDrag.lastT) / 1000;
 
-  // 1:1 pixel follow
-  camX -= dx * DRAG_SCALE;
-  camY -= dy * DRAG_SCALE;
+  if(dt > 0.001){
+    panDrag.vx = dx / dt;
+    panDrag.vy = dy / dt;
+    panDrag.lastT = now;
+  }
 
-  // estimate velocity for inertia
-  panDrag.vx = dx / dt;
-  panDrag.vy = dy / dt;
+  camX -= dx;
+  camY -= dy;
 
-  if(Math.abs(dx)>2||Math.abs(dy)>2) panDrag.moved=true;
+  panDrag.totalMove += Math.abs(dx) + Math.abs(dy);
+  if(panDrag.totalMove > TAP_MOVE_PX) panDrag.moved = true;
 
-  panDrag.lx=e.clientX; panDrag.ly=e.clientY;
-  panDrag.lastT=now;
+  panDrag.lx = e.clientX;
+  panDrag.ly = e.clientY;
+
+  if(modeWin) modeUserMoved = true;
 }
-function endPanDrag(e){
-  if(!panDrag||e.pointerId!==panDrag.id) return;
-  const p=panDrag;
-  panDrag=null;
 
-  // apply inertia only if it was a real drag
+function endPanDrag(e){
+  if(!panDrag || e.pointerId !== panDrag.id) return;
+  const p = panDrag;
+  panDrag = null;
+
   if(p.moved){
-    camVelX = -p.vx * 0.35;
-    camVelY = -p.vy * 0.35;
+    // inertia
+    camVelX = -p.vx * PAN_VEL_MULT;
+    camVelY = -p.vy * PAN_VEL_MULT;
+    const sp = Math.hypot(camVelX, camVelY);
+    if(sp > PAN_VEL_MAX){
+      camVelX *= PAN_VEL_MAX / sp;
+      camVelY *= PAN_VEL_MAX / sp;
+    }
+    // reset sensor baseline so post-drag tilt doesn't jump
+    if(MOBILE){ sensorLastAlpha = null; sensorLastBeta = null; sensDeltaX = 0; sensDeltaY = 0; }
   } else {
-    // it was a tap → create window
-    const isBottom = e.clientY > innerHeight*(1-BOTTOM_FRAC);
+    // it was a tap
+    const isBottom = e.clientY > innerHeight * (1 - BOTTOM_FRAC);
     if(isBottom){
-      const now=performance.now();
-      if(now-lastBottomTap<BOTTOM_DBL_MS){
-        recalibrateTilt();
-        if(!sensorState.motionEnabled){ camX=0; camY=0; camVelX=0; camVelY=0; }
-        lastBottomTap=0;
+      const now = performance.now();
+      if(now - lastBottomTap < BOTTOM_DBL_MS){
+        resetAll();
+        lastBottomTap = 0;
       } else {
-        lastBottomTap=now;
+        lastBottomTap = now;
       }
     } else {
       if(MOBILE){
-        createWindow(camX-130, camY-85);
+        createWindow(camX - 130, camY - 85);
       } else {
-        createWindow(e.clientX - innerWidth/2  + camX - 130,
+        createWindow(e.clientX - innerWidth/2 + camX - 130,
                      e.clientY - innerHeight/2 + camY - 85);
       }
     }
   }
 }
 
-worldEl.addEventListener('pointerdown',e=>{
-  if(e.target.closest&&e.target.closest('.win')) return;
+function resetAll(){
+  camX = 0; camY = 0;
+  camVelX = 0; camVelY = 0;
+  sensorLastAlpha = null; sensorLastBeta = null;
+  sensDeltaX = 0; sensDeltaY = 0;
+}
+
+worldEl.addEventListener('pointerdown', e => {
+  if(e.target.closest && e.target.closest('.win')) return;
   startPanDrag(e);
   if(MOBILE) requestMotion();
 });
-worldEl.addEventListener('pointermove',movePanDrag,{passive:false});
-worldEl.addEventListener('pointerup',endPanDrag);
-worldEl.addEventListener('pointercancel',endPanDrag);
+worldEl.addEventListener('pointermove', movePanDrag, { passive: false });
+worldEl.addEventListener('pointerup', endPanDrag);
+worldEl.addEventListener('pointercancel', endPanDrag);
 
-let lastBottomTap=0;
+window.addEventListener('mousemove', e => {
+  mouse.sx = e.clientX;
+  mouse.sy = e.clientY;
+});
 
-// ---- AOE charge (mobile)
-let chargeBtn=null, chargeStart=0, firedBtn=null;
-let lastCCamX=0, lastCCamY=0;
+// ---- AOE charge (mobile only)
+let chargeBtn = null, chargeStart = 0, firedBtn = null;
 
-function setCharge(btn,p,on){
+function setCharge(btn, p, on){
   if(!btn) return;
-  btn.classList.toggle('charge',!!on);
-  const r2=btn.querySelector('.r2');
-  if(r2) r2.style.transform='translate(-50%,-50%) scale('+(on?Math.max(0.06,p):0)+')';
+  btn.classList.toggle('charge', !!on);
+  const r2 = btn.querySelector('.r2');
+  if(r2) r2.style.transform = 'translate(-50%,-50%) scale(' + (on ? Math.max(0.06, p) : 0) + ')';
 }
-function setRing(p,on){
-  ringEl.style.opacity=on?'1':'0';
-  ringEl.style.strokeDashoffset=String(RING_LEN*(1-Math.min(1,p)));
+function setRing(p, on){
+  ringEl.style.opacity = on ? '1' : '0';
+  ringEl.style.strokeDashoffset = String(RING_LEN * (1 - Math.min(1, p)));
+}
+function findButtonAtCenter(){
+  const cx = innerWidth/2, cy = innerHeight/2;
+  const offs = [0, -3, 3];
+  for(const dx of offs){
+    for(const dy of offs){
+      const el = document.elementFromPoint(cx + dx, cy + dy);
+      const btn = el && el.closest ? el.closest('.btn') : null;
+      if(btn) return btn;
+    }
+  }
+  return null;
 }
 function updateCharge(t){
-  if(modeWin){
-    if(chargeBtn) setCharge(chargeBtn,0,false);
-    chargeBtn=null;
+  if(modeWin || drag || panDrag){
+    if(chargeBtn) setCharge(chargeBtn, 0, false);
+    chargeBtn = null;
     return;
   }
-  const el=document.elementFromPoint(innerWidth/2,innerHeight/2);
-  const btn=(el&&el.closest)?el.closest('.btn'):null;
+  const btn = findButtonAtCenter();
 
-  if(Math.abs(camX-lastCCamX)>0.6||Math.abs(camY-lastCCamY)>0.6){
-    lastCCamX=camX; lastCCamY=camY;
-    if(chargeBtn) setCharge(chargeBtn,0,false);
-    chargeBtn=btn;
-    chargeStart=t;
-    firedBtn=null;
-    if(chargeBtn) setCharge(chargeBtn,0,true);
-    return;
+  if(btn !== chargeBtn){
+    if(chargeBtn) setCharge(chargeBtn, 0, false);
+    chargeBtn = btn;
+    chargeStart = t;
+    firedBtn = null;
+    if(chargeBtn) setCharge(chargeBtn, 0, true);
   }
-  if(btn!==chargeBtn){
-    if(chargeBtn) setCharge(chargeBtn,0,false);
-    chargeBtn=btn;
-    chargeStart=t;
-    firedBtn=null;
-    if(chargeBtn) setCharge(chargeBtn,0,true);
-  }
-  if(!chargeBtn||chargeBtn===firedBtn) return;
-  const p=(t-chargeStart)/STILL_MS;
-  if(p>=1){
-    firedBtn=chargeBtn;
-    setCharge(chargeBtn,0,false);
+
+  if(!chargeBtn || chargeBtn === firedBtn) return;
+
+  const p = (t - chargeStart) / STILL_MS;
+  if(p >= 1){
+    firedBtn = chargeBtn;
+    setCharge(chargeBtn, 0, false);
     chargeBtn.click();
   } else {
-    setCharge(chargeBtn,p,true);
+    setCharge(chargeBtn, p, true);
   }
 }
 
 // ---- frame
-let lastT=0;
+let lastT = 0;
 function frame(t){
-  if(!lastT) lastT=t;
-  const dt=Math.min(0.05,(t-lastT)/1000);
-  lastT=t;
+  if(!lastT) lastT = t;
+  const dt = Math.min(0.05, (t - lastT) / 1000);
+  lastT = t;
 
-  // camera
+  // Camera inertia
   if(!panDrag && !drag){
-    const tilt=currentTilt();
-    camVelX += tilt.tx * 8000 * dt;
-    camVelY += tilt.ty * 8000 * dt;
+    camX += camVelX * dt;
+    camY += camVelY * dt;
+    camVelX *= PAN_DECAY;
+    camVelY *= PAN_DECAY;
+    if(Math.abs(camVelX) < 1) camVelX = 0;
+    if(Math.abs(camVelY) < 1) camVelY = 0;
   }
 
-  // friction
-  const fr = panDrag ? DRAG_FRICTION : INERTIA_FRICTION;
-  camVelX *= fr;
-  camVelY *= fr;
-  camX += camVelX * dt;
-  camY += camVelY * dt;
+  // Sensor deltas → camera
+  if(MOBILE && hasSensor && !panDrag && !drag){
+    camX += sensDeltaX;
+    camY += sensDeltaY;
+    sensDeltaX = 0;
+    sensDeltaY = 0;
+  } else if(sensDeltaX || sensDeltaY){
+    sensDeltaX = 0; sensDeltaY = 0;
+  }
 
-  // crosshair
+  // Crosshair
   if(MOBILE){
-    crossEl.style.transform='translate('+(innerWidth/2-12)+'px,'+(innerHeight/2-12)+'px)';
+    crossEl.style.transform = 'translate(' + (innerWidth/2 - 12) + 'px,' + (innerHeight/2 - 12) + 'px)';
   } else {
-    crossEl.style.transform='translate('+(mouse.sx-12)+'px,'+(mouse.sy-12)+'px)';
+    crossEl.style.transform = 'translate(' + (mouse.sx - 12) + 'px,' + (mouse.sy - 12) + 'px)';
   }
 
-  // mode
+  // Mode logic
   if(modeWin){
-    if(modeWin.mode==='move'){
-      modeWin.x=camX+modeWin.offX;
-      modeWin.y=camY+modeWin.offY;
-    } else if(modeWin.mode==='resize'){
-      modeWin.x=modeWin.anchorX;
-      modeWin.y=modeWin.anchorY;
-      modeWin.w=Math.max(120,camX-modeWin.anchorX);
-      modeWin.h=Math.max(80, camY-modeWin.anchorY);
+    if(modeWin.mode === 'move'){
+      modeWin.x = camX + modeWin.offX;
+      modeWin.y = camY + modeWin.offY;
+    } else if(modeWin.mode === 'resize'){
+      modeWin.x = modeWin.anchorX;
+      modeWin.y = modeWin.anchorY;
+      modeWin.w = Math.max(120, camX - modeWin.anchorX);
+      modeWin.h = Math.max(80,  camY - modeWin.anchorY);
     }
-    if(Math.abs(camX-modeStillCamX)>0.5||Math.abs(camY-modeStillCamY)>0.5){
-      modeStillCamX=camX; modeStillCamY=camY;
-      modeStillStart=t;
+    if(modeUserMoved){
+      modeStillStart = t;
+      modeUserMoved = false;
     }
-    const p=(t-modeStillStart)/STILL_MS;
-    if(p>=1){ applyMode(modeWin,null); }
-    else { setRing(p,true); }
+    const p = (t - modeStillStart) / STILL_MS;
+    if(p >= 1){
+      applyMode(modeWin, null);
+    } else {
+      setRing(p, true);
+    }
   } else {
-    setRing(0,false);
+    setRing(0, false);
   }
 
-  // layout windows
-  const hw=innerWidth/2, hh=innerHeight/2;
-  for(let i=0;i<wins.length;i++){
-    const o=wins[i];
-    if(o._w!==o.w){o.el.style.width=o.w+'px'; o._w=o.w;}
-    if(o._h!==o.h){o.el.style.height=o.h+'px'; o._h=o.h;}
-    o.el.style.transform='translate('+Math.round(o.x-camX+hw)+'px,'+Math.round(o.y-camY+hh)+'px)';
+  // Layout windows
+  const hw = innerWidth/2, hh = innerHeight/2;
+  for(let i = 0; i < wins.length; i++){
+    const o = wins[i];
+    if(o._w !== o.w){ o.el.style.width  = o.w + 'px'; o._w = o.w; }
+    if(o._h !== o.h){ o.el.style.height = o.h + 'px'; o._h = o.h; }
+    o.el.style.transform = 'translate(' + Math.round(o.x - camX + hw) + 'px,' +
+                                          Math.round(o.y - camY + hh) + 'px)';
   }
 
   if(MOBILE) updateCharge(t);
