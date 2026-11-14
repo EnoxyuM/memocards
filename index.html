@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=overlays-content">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>AR Windows</title>
 <style>
@@ -14,7 +14,6 @@
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
     touch-action: none;
-    -webkit-text-size-adjust: 100%;
   }
   body.xr-mode { background: transparent; }
 
@@ -240,7 +239,7 @@
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.6.5</div>
+  <div id="start-version">v1.7.0</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -250,10 +249,7 @@
   'use strict';
   if (typeof THREE === 'undefined') { console.error('[pano] Three.js не загрузился'); return; }
 
-  /* ============================================================
-     VERSION
-     ============================================================ */
-  const VERSION = '1.6.5';
+  const VERSION = '1.7.0';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -284,13 +280,6 @@
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
   renderer.setClearColor(0x000000, 0);
-
-  canvas.addEventListener('webglcontextlost', function () {
-    console.warn('[gl] context lost');
-  }, false);
-  canvas.addEventListener('webglcontextrestored', function () {
-    console.warn('[gl] context restored');
-  }, false);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 2000);
@@ -336,16 +325,6 @@
   const UI_TAP_GUARD_MS = 250;
   function markUITap() { uiTapTime = performance.now(); }
   function recentUITap() { return performance.now() - uiTapTime < UI_TAP_GUARD_MS; }
-
-  /* ============================================================
-     Editing guard
-     ============================================================ */
-  let lastEditEnd = 0;
-  function recentlyEdited() {
-    if (editingWin) return true;
-    if (performance.now() - lastEditEnd < 500) return true;
-    return false;
-  }
 
   /* ============================================================
      Settings
@@ -462,12 +441,6 @@
 
   videoEl.addEventListener('loadedmetadata', updateVideoFit);
   videoEl.addEventListener('canplay', updateVideoFit);
-  videoEl.addEventListener('pause', function () {
-    if (!started) return;
-    if (document.hidden) return;
-    if (xrMode) return;
-    videoEl.play().catch(function () {});
-  });
 
   /* ============================================================
      Aim placement
@@ -933,32 +906,18 @@
     editInput.setAttribute('autocorrect', 'off');
     editInput.setAttribute('autocapitalize', 'sentences');
     editInput.rows = 3;
-    // Фиксированные размеры — чтобы показ/скрытие панели предсказаний GBoard
-    // не вызывал reflow (и, как следствие, перерисовку DOM-слоя).
     Object.assign(editInput.style, {
-      position: 'fixed',
-      left: '50%',
-      top: '72px',
-      transform: 'translateX(-50%)',
-      width: '380px',
-      maxWidth: 'calc(100vw - 32px)',
-      height: '180px',
-      boxSizing: 'border-box',
-      padding: '14px 18px',
-      fontSize: '20px',
+      position: 'fixed', left: '50%', top: '25%',
+      transform: 'translate(-50%, -50%)',
+      width: '78%', maxWidth: '440px', boxSizing: 'border-box',
+      padding: '14px 18px', fontSize: '20px',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-      background: '#0d0d11',
-      color: '#e9f8ff',
-      border: '2px solid #5ad0ff',
-      borderRadius: '10px',
+      background: '#0d0d11', color: '#e9f8ff',
+      border: '2px solid #5ad0ff', borderRadius: '10px',
       boxShadow: '0 0 24px rgba(90,208,255,0.55)',
-      zIndex: 100,
-      outline: 'none',
-      display: 'none',
-      caretColor: '#5ad0ff',
-      resize: 'none',
-      lineHeight: '1.35',
-      overflowY: 'auto'
+      zIndex: 100, outline: 'none', display: 'none',
+      caretColor: '#5ad0ff', resize: 'none',
+      lineHeight: '1.35', minHeight: '80px', maxHeight: '42vh', overflowY: 'auto'
     });
     document.body.appendChild(editInput);
     editInput.addEventListener('keydown', function (e) {
@@ -967,7 +926,7 @@
     editInput.addEventListener('blur', function () {
       setTimeout(function () {
         if (editingWin && document.activeElement !== editInput) commitEdit();
-      }, 300);
+      }, 120);
     });
     return editInput;
   }
@@ -1014,21 +973,17 @@
     if (!editingWin || !editInput) return;
     const win = editingWin;
     editingWin = null;
-    lastEditEnd = performance.now();
     const value = editInput.value;
     if (win.flipped) win.textBack = value; else win.textFront = value;
     refreshWindow(win);
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
-    setTimeout(resize, 500);
   }
   function cancelEdit() {
     if (!editInput) return;
     editingWin = null;
-    lastEditEnd = performance.now();
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
-    setTimeout(resize, 500);
   }
 
   /* ============================================================
@@ -1076,33 +1031,17 @@
   /* ============================================================
      Resize
      ============================================================ */
-  let lastResizeW = 0, lastResizeH = 0;
-
   function resize() {
     if (renderer.xr.isPresenting) return;
-    if (recentlyEdited()) return;
-
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
     if (w < 10) w = window.innerWidth;
     if (h < 10) h = window.innerHeight;
-
-    if (Math.abs(w - lastResizeW) < 4 && Math.abs(h - lastResizeH) < 4) return;
-    lastResizeW = w;
-    lastResizeH = h;
-
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     updateVideoFit();
-  }
-
-  let resizeTimer = null;
-  function scheduleResize() {
-    if (recentlyEdited()) return;
-    if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(resize, 100);
   }
 
   const startScreen = document.getElementById('start-screen');
@@ -1114,14 +1053,13 @@
     setTimeout(resize, 250);
     setTimeout(updateVideoFit, 300);
   });
-  window.addEventListener('resize', scheduleResize);
+  window.addEventListener('resize', resize);
 
   /* ============================================================
      HUD
      ============================================================ */
   function updateHUD() {
     if (!started) { hudEl.classList.remove('visible'); return; }
-    if (recentlyEdited()) return;
     hudEl.classList.add('visible');
     const pos = xrMode ? _xrViewerPos : getEye();
     const moving = xrViewerPosChanges > 5;
@@ -1246,7 +1184,6 @@
     if (!started) return;
     if (recentUITap()) return;
     if (isMenuOpen()) return;
-    if (recentlyEdited()) return;
 
     const found = getButtonUnderCrosshair();
     if (found) {
@@ -1300,7 +1237,7 @@
       }
     }
 
-    if (started && !recentlyEdited()) {
+    if (started) {
       const dt = 1 / 60;
       updateHover(dt);
       updateMode(dt);
@@ -1326,7 +1263,7 @@
 
     camera.position.set(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
 
-    if (started && !recentlyEdited()) {
+    if (started) {
       updateWindowVisibility();
       updateHover(dt);
       updateMode(dt);
@@ -1402,8 +1339,11 @@
     if (recentUITap()) { consumeNextTap = true; return; }
     if (editingWin) { commitEdit(); consumeNextTap = true; return; }
     pointerInfo = {
-      id: e.pointerId, lastX: e.clientX, lastY: e.clientY,
-      moved: 0, t: performance.now()
+      id: e.pointerId,
+      startX: e.clientX, startY: e.clientY,
+      lastX: e.clientX, lastY: e.clientY,
+      maxDist: 0,
+      t: performance.now()
     };
     if (lookMode && canvas.setPointerCapture) {
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
@@ -1413,8 +1353,10 @@
     if (!pointerInfo || e.pointerId !== pointerInfo.id) return;
     const dx = e.clientX - pointerInfo.lastX;
     const dy = e.clientY - pointerInfo.lastY;
-    pointerInfo.lastX = e.clientX; pointerInfo.lastY = e.clientY;
-    pointerInfo.moved += Math.abs(dx) + Math.abs(dy);
+    pointerInfo.lastX = e.clientX;
+    pointerInfo.lastY = e.clientY;
+    const distFromStart = Math.hypot(e.clientX - pointerInfo.startX, e.clientY - pointerInfo.startY);
+    if (distFromStart > pointerInfo.maxDist) pointerInfo.maxDist = distFromStart;
     if (lookMode && !mode && !editingWin) {
       lookYaw -= dx * 0.0045;
       lookPitch -= dy * 0.0045;
@@ -1428,8 +1370,12 @@
     pointerInfo = null;
     if (!started || xrMode) return;
     if (recentUITap()) return;
-    if (performance.now() - lastEditEnd < 300) return;
-    if (info.moved < 12 && performance.now() - info.t < 700) {
+
+    // Тап = почти нулевое смещение от точки касания И короткое время.
+    // Свайп (даже быстрый и короткий) даст maxDist >> 10 или займёт > 400 мс.
+    const isTap = (info.maxDist < 10) && (performance.now() - info.t < 400);
+
+    if (isTap) {
       if (mode) { mode = null; hideModeVisuals(); }
       else if (!editingWin) createWindowCenter();
     }
