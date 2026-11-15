@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=resizes-visual">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>AR Windows</title>
 <style>
@@ -10,11 +10,15 @@
     margin: 0; padding: 0;
     width: 100%; height: 100%;
     overflow: hidden;
+    overscroll-behavior: none;
     background: #000;
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
     touch-action: none;
   }
+  /* Фиксируем body, чтобы клавиатура не могла проскроллить документ
+     и утащить за собой весь fixed-UI (iOS/Android). */
+  body { position: fixed; inset: 0; }
   body.xr-mode { background: transparent; }
 
   #camera-feed {
@@ -239,7 +243,7 @@
 <div id="start-screen">
   <div id="start-title">Tap to Start.</div>
   <div id="start-sub">AR Windows</div>
-  <div id="start-version">v1.7.0</div>
+  <div id="start-version">v1.7.1</div>
   <div id="start-mode">Определяем поддержку AR…</div>
 </div>
 
@@ -249,7 +253,7 @@
   'use strict';
   if (typeof THREE === 'undefined') { console.error('[pano] Three.js не загрузился'); return; }
 
-  const VERSION = '1.7.0';
+  const VERSION = '1.7.1';
   document.getElementById('start-version').textContent = 'v' + VERSION;
 
   const DEG = Math.PI / 180;
@@ -369,9 +373,12 @@
   });
   btnTimeInput.addEventListener('blur', function () {
     const v = parseFloat(btnTimeInput.value);
-    if (!isFinite(v)) { btnTimeInput.value = buttonHoldTime.toFixed(2); return; }
-    applyButtonTime(v);
-    btnTimeInput.value = buttonHoldTime.toFixed(2);
+    if (!isFinite(v)) { btnTimeInput.value = buttonHoldTime.toFixed(2); }
+    else {
+      applyButtonTime(v);
+      btnTimeInput.value = buttonHoldTime.toFixed(2);
+    }
+    onKeyboardDismissed();
   });
   btnTimeInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); btnTimeInput.blur(); }
@@ -896,6 +903,37 @@
      Text input (textarea)
      ============================================================ */
   let editInput = null, editingWin = null;
+  const vv = window.visualViewport || null;
+
+  // Держим поле целиком внутри ВИДИМОЙ области (над клавиатурой),
+  // чтобы браузеру не приходилось скроллить страницу к каретке.
+  function positionEditInput() {
+    if (!editInput || !editingWin || editInput.style.display === 'none') return;
+    const vvh = vv ? vv.height : window.innerHeight;
+    const vvt = vv ? vv.offsetTop : 0;
+    const maxH = Math.max(80, Math.floor(vvh * 0.5));
+    editInput.style.maxHeight = maxH + 'px';
+    const h = Math.min(editInput.offsetHeight || 80, maxH);
+    let top = Math.round(vvt + vvh * 0.25 - h / 2);
+    top = Math.max(vvt + 8, Math.min(top, vvt + vvh - h - 8));
+    editInput.style.top = top + 'px';
+  }
+
+  // Пока идёт ввод — не даём браузеру уводить документ в скролл
+  // (иначе весь fixed-UI прыгает при появлении/исчезновении клавиатуры).
+  function lockPageScroll() {
+    if (!editingWin) return;
+    if (window.pageXOffset !== 0 || window.pageYOffset !== 0) window.scrollTo(0, 0);
+  }
+
+  // Клавиатура закрылась: её анимация ещё несколько сотен мс дёргает
+  // viewport — глушим ресайзы на это время, потом один раз синхронизируемся.
+  function onKeyboardDismissed() {
+    try { window.scrollTo(0, 0); } catch (e) {}
+    resizeCooldownUntil = performance.now() + 450;
+    setTimeout(function () { resize(); }, 500);
+    setTimeout(function () { resize(); }, 900);
+  }
 
   function ensureInput() {
     if (editInput) return editInput;
@@ -908,7 +946,7 @@
     editInput.rows = 3;
     Object.assign(editInput.style, {
       position: 'fixed', left: '50%', top: '25%',
-      transform: 'translate(-50%, -50%)',
+      transform: 'translate(-50%, 0)',
       width: '78%', maxWidth: '440px', boxSizing: 'border-box',
       padding: '14px 18px', fontSize: '20px',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
@@ -923,9 +961,12 @@
     editInput.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
     });
+    editInput.addEventListener('focus', function () {
+      requestAnimationFrame(positionEditInput);
+    });
     editInput.addEventListener('blur', function () {
       setTimeout(function () {
-        if (editingWin && document.activeElement !== editInput) commitEdit();
+        if (editingWin && editInput.style.display !== 'none' && document.activeElement !== editInput) commitEdit();
       }, 120);
     });
     return editInput;
@@ -934,6 +975,7 @@
   let warmInput = null;
   function warmUpKeyboard() {
     if (warmInput) return;
+    resizeCooldownUntil = performance.now() + 350;
     warmInput = document.createElement('input');
     warmInput.type = 'text'; warmInput.setAttribute('autocomplete', 'off');
     Object.assign(warmInput.style, {
@@ -944,6 +986,7 @@
     document.body.appendChild(warmInput);
     try { warmInput.focus(); } catch (e) {}
     setTimeout(function () { try { warmInput.blur(); } catch (e) {} }, 30);
+    setTimeout(function () { resize(); }, 500);
   }
 
   function editText(win) {
@@ -956,18 +999,25 @@
     editInput.style.color = win.flipped ? '#f5dce8' : '#e9f8ff';
     editInput.value = win.flipped ? win.textBack : win.textFront;
     editInput.style.display = 'block';
+    positionEditInput();
     const tryFocus = function () {
+      if (!editingWin) return;
+      // Уже сфокусировано — НЕ трогаем focus/selection: иначе повторные
+      // вызовы сбрасывают каретку и скроллят страницу прямо во время набора.
+      if (document.activeElement === editInput) return;
       try {
         editInput.focus({ preventScroll: true });
         const len = editInput.value.length;
         editInput.setSelectionRange(len, len);
+        editInput.scrollTop = editInput.scrollHeight;
       } catch (e) {}
     };
     tryFocus();
-    requestAnimationFrame(tryFocus);
+    requestAnimationFrame(function () { tryFocus(); positionEditInput(); });
     setTimeout(tryFocus, 20);
     setTimeout(tryFocus, 80);
-    setTimeout(tryFocus, 200);
+    setTimeout(function () { tryFocus(); positionEditInput(); }, 200);
+    setTimeout(positionEditInput, 400);
   }
   function commitEdit() {
     if (!editingWin || !editInput) return;
@@ -978,12 +1028,14 @@
     refreshWindow(win);
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
+    onKeyboardDismissed();
   }
   function cancelEdit() {
     if (!editInput) return;
     editingWin = null;
     editInput.style.display = 'none';
     try { editInput.blur(); } catch (e) {}
+    onKeyboardDismissed();
   }
 
   /* ============================================================
@@ -1031,17 +1083,50 @@
   /* ============================================================
      Resize
      ============================================================ */
+  let lastAppliedW = 0, lastAppliedH = 0, lastAppliedDpr = 0;
+  let resizeCooldownUntil = 0;
+  let resizeTimer = null;
+
+  function isTypingFocus() {
+    const ae = document.activeElement;
+    if (!ae) return false;
+    if (ae.tagName === 'TEXTAREA') return true;
+    if (ae.tagName === 'INPUT' && ae.type !== 'range') return true;
+    return false;
+  }
+
   function resize() {
     if (renderer.xr.isPresenting) return;
+    // Пока открыта клавиатура (или только что закрылась), высота вьюпорта
+    // "пляшет" при каждом нажатии/панели подсказок. setSize/setPixelRatio
+    // пересоздают и очищают drawing buffer -> чёрный кадр -> мелькание.
+    // Поэтому в это время буфер вообще не трогаем.
+    if (editingWin || isTypingFocus() || performance.now() < resizeCooldownUntil) return;
+
     let w = canvas.clientWidth || window.innerWidth;
     let h = canvas.clientHeight || window.innerHeight;
     if (w < 10) w = window.innerWidth;
     if (h < 10) h = window.innerHeight;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
+    const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+
+    // Ничего не изменилось — не трогаем канвас (любая запись canvas.width
+    // очищает буфер, даже если значение то же самое).
+    if (w === lastAppliedW && h === lastAppliedH && dpr === lastAppliedDpr) return;
+    lastAppliedW = w; lastAppliedH = h; lastAppliedDpr = dpr;
+
+    if (renderer.getPixelRatio() !== dpr) renderer.setPixelRatio(dpr);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     updateVideoFit();
+    // setSize очистил буфер — рисуем СРАЗУ ЖЕ в этом же таске,
+    // чтобы пустой канвас никогда не попал на экран.
+    renderer.render(scene, camera);
+  }
+
+  function scheduleResize(delay) {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { resizeTimer = null; resize(); }, delay);
   }
 
   const startScreen = document.getElementById('start-screen');
@@ -1049,15 +1134,30 @@
 
   window.addEventListener('orientationchange', function () {
     screenOrient = window.orientation || 0;
-    setTimeout(resize, 50);
-    setTimeout(resize, 250);
-    setTimeout(updateVideoFit, 300);
+    scheduleResize(80);
+    setTimeout(resize, 300);
+    setTimeout(updateVideoFit, 350);
+    if (editingWin) positionEditInput();
   });
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', function () {
+    if (editingWin) { positionEditInput(); return; }
+    scheduleResize(120);
+  });
+  if (vv) {
+    vv.addEventListener('resize', function () {
+      if (editingWin) { positionEditInput(); lockPageScroll(); }
+      else scheduleResize(150);
+    });
+    vv.addEventListener('scroll', function () {
+      if (editingWin) { positionEditInput(); lockPageScroll(); }
+    });
+  }
+  window.addEventListener('scroll', lockPageScroll, { passive: true });
 
   /* ============================================================
      HUD
      ============================================================ */
+  let lastHudHtml = '';
   function updateHUD() {
     if (!started) { hudEl.classList.remove('visible'); return; }
     hudEl.classList.add('visible');
@@ -1068,7 +1168,7 @@
       : 'n/a';
     const modeStr = xrMode ? 'AR (6DoF)' : 'fallback (3DoF)';
     const posCls = xrMode ? (moving ? 'good' : 'warn') : 'bad';
-    hudEl.innerHTML =
+    const html =
       '<span class="' + (xrMode ? 'good' : 'bad') + '">' + modeStr + '</span>\n' +
       'ref: ' + activeRefSpaceType + '\n' +
       'hit: ' + hitStatus + '\n' +
@@ -1076,6 +1176,7 @@
         pos.x.toFixed(2) + ' ' + pos.y.toFixed(2) + ' ' + pos.z.toFixed(2) +
       '</span>\n' +
       'win: ' + windows.length + '  v' + VERSION;
+    if (html !== lastHudHtml) { hudEl.innerHTML = html; lastHudHtml = html; }
   }
 
   /* ============================================================
